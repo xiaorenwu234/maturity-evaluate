@@ -1,0 +1,79 @@
+# Configuration-read rules (Semgrep YAML).
+#
+# Contract: message payload keys
+#   t     : "config"
+#   key   : config key (JSON string)
+#   def   : default value if the rule can see one (optional)
+#   src   : provenance tag: "env" | "django" | "spring" | "viper"
+rules:
+  - id: kgb-config-getenv-with-default
+    languages: [python]
+    severity: INFO
+    pattern: os.getenv($KEY, $DEFAULT)
+    message: 'kgb-json {"t":"config","key":$KEY,"def":$DEFAULT,"src":"env"}'
+    metadata:
+      kgb_type: config
+
+  - id: kgb-config-getenv-bare
+    languages: [python]
+    severity: INFO
+    pattern: os.getenv($KEY)
+    message: 'kgb-json {"t":"config","key":$KEY,"src":"env"}'
+    metadata:
+      kgb_type: config
+
+  - id: kgb-config-environ-lookup
+    languages: [python]
+    severity: INFO
+    pattern: os.environ[$KEY]
+    message: 'kgb-json {"t":"config","key":$KEY,"src":"env"}'
+    metadata:
+      kgb_type: config
+
+  - id: kgb-config-environ-get
+    languages: [python]
+    severity: INFO
+    pattern-either:
+      - pattern: os.environ.get($KEY)
+      - pattern: os.environ.get($KEY, $DEFAULT)
+    message: 'kgb-json {"t":"config","key":$KEY,"def":$DEFAULT,"src":"env"}'
+    metadata:
+      kgb_type: config
+
+  - id: kgb-config-django-settings
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern: settings.$NAME
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: ^[A-Z][A-Z0-9_]+$
+    message: 'kgb-json {"t":"config","key":"$NAME","src":"django"}'
+    metadata:
+      kgb_type: config
+
+  - id: kgb-config-spring-value
+    languages: [java]
+    severity: INFO
+    patterns:
+      # Capture the *whole* annotation argument: a metavariable *inside* the
+      # string literal ("${$KEY}") never matches on Java. Interpolation strips
+      # the surrounding quotes, so $X arrives as `${key[:default]}` -- the
+      # mapping layer (frameworks._apply_config) unwraps `${}` and splits the
+      # embedded default.
+      - pattern: '@Value($X)'
+    message: 'kgb-json {"t":"config","key":$X,"src":"spring"}'
+    metadata:
+      kgb_type: config
+
+  - id: kgb-config-viper
+    languages: [go]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: viper.GetString($KEY)
+          - pattern: viper.GetInt($KEY)
+          - pattern: viper.GetBool($KEY)
+    message: 'kgb-json {"t":"config","key":$KEY,"src":"viper"}'
+    metadata:
+      kgb_type: config

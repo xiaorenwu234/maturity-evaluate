@@ -1,0 +1,112 @@
+# Service detection rules for Spring/Java and Python frameworks.
+# Identifies service classes via framework-specific annotations/decorators.
+# Payload: {"fw": "<framework>", "t": "service", "class": "$CLASS"}
+
+rules:
+  # --- Java/Spring Framework ---
+  - id: spring-service-annotation
+    languages: [java]
+    message: >-
+      kgb-json {"fw":"spring","t":"service","class":"$CLASS"}
+    patterns:
+      - pattern: |
+          @Service
+          class $CLASS { ... }
+      - pattern: |
+          @org.springframework.stereotype.Service
+          class $CLASS { ... }
+    severity: INFO
+
+  - id: spring-component-annotation
+    languages: [java]
+    message: >-
+      kgb-json {"fw":"spring","t":"service","class":"$CLASS"}
+    patterns:
+      - pattern: |
+          @Component
+          class $CLASS { ... }
+      - pattern: |
+          @org.springframework.stereotype.Component
+          class $CLASS { ... }
+    severity: INFO
+
+  - id: spring-restcontroller-annotation
+    languages: [java]
+    message: >-
+      kgb-json {"fw":"spring","t":"service","class":"$CLASS"}
+    patterns:
+      - pattern: |
+          @RestController
+          class $CLASS { ... }
+      - pattern: |
+          @org.springframework.web.bind.annotation.RestController
+          class $CLASS { ... }
+    severity: INFO
+
+  - id: spring-controller-annotation
+    languages: [java]
+    message: >-
+      kgb-json {"fw":"spring","t":"service","class":"$CLASS"}
+    patterns:
+      - pattern: |
+          @Controller
+          class $CLASS { ... }
+      - pattern: |
+          @org.springframework.stereotype.Controller
+          class $CLASS { ... }
+    severity: INFO
+
+  - id: spring-repository-annotation
+    languages: [java]
+    message: >-
+      kgb-json {"fw":"spring","t":"service","class":"$CLASS"}
+    patterns:
+      - pattern: |
+          @Repository
+          class $CLASS { ... }
+      - pattern: |
+          @org.springframework.stereotype.Repository
+          class $CLASS { ... }
+    severity: INFO
+
+  # --- Python/FastAPI ---
+  - id: fastapi-app-class
+    languages: [python]
+    message: >-
+      kgb-json {"fw":"fastapi","t":"service","class":"$CLASS"}
+    pattern: |
+      class $CLASS(...):
+        ...
+        app = FastAPI(...)
+    severity: INFO
+
+  # --- Python/Flask ---
+  - id: flask-app-class
+    languages: [python]
+    message: >-
+      kgb-json {"fw":"flask","t":"service","class":"$CLASS"}
+    pattern: |
+      class $CLASS(...):
+        ...
+        app = Flask(...)
+    severity: INFO
+
+  # --- Python/Django ---
+  - id: django-view-class
+    languages: [python]
+    message: >-
+      kgb-json {"fw":"django","t":"service","class":"$CLASS"}
+    patterns:
+      - pattern: |
+          class $CLASS(View):
+            ...
+      - pattern: |
+          class $CLASS(generic.View):
+            ...
+      - pattern: |
+          class $CLASS(APIView):
+            ...
+      - pattern: |
+          class $CLASS(rest_framework.views.APIView):
+            ...
+    severity: INFO

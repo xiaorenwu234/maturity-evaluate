@@ -1,0 +1,301 @@
+# Resource-touchpoint rules (Semgrep YAML).
+#
+# Contract (see runner): every rule emits a `kgb-json` payload with keys
+#   t   : "resource"
+#   cat : "database" | "cache" | "message_queue" | "external_service"
+#   op  : "read" | "write" | "publish" | "subscribe" (optional)
+#   name: target identifier (library / class / host) -- optional
+#   u   : raw connection / URL string literal -- optional, mapping layer
+#         extracts the concrete DB name or host from it
+rules:
+  # ------------------------------------------------------ SQLAlchemy / generic DB clients
+  - id: kgb-db-create-engine
+    languages: [python]
+    severity: INFO
+    pattern: create_engine($URL, ...)
+    message: 'kgb-json {"t":"resource","cat":"database","u":$URL,"name":"sqlalchemy"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-sessionmaker
+    languages: [python]
+    severity: INFO
+    pattern: sessionmaker(...)
+    message: 'kgb-json {"t":"resource","cat":"database","name":"sqlalchemy"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-pymysql-connect
+    languages: [python]
+    severity: INFO
+    pattern: pymysql.connect(...)
+    message: 'kgb-json {"t":"resource","cat":"database","name":"mysql"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-psycopg2-connect
+    languages: [python]
+    severity: INFO
+    pattern: psycopg2.connect(...)
+    message: 'kgb-json {"t":"resource","cat":"database","name":"postgres"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-redis-client
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: redis.Redis(...)
+          - pattern: redis.StrictRedis(...)
+          - pattern: redis.from_url(...)
+    message: 'kgb-json {"t":"resource","cat":"cache","name":"redis"}'
+    metadata:
+      kgb_type: resource
+
+  # ------------------------------------------------------ ORM session reads / writes
+  - id: kgb-db-session-write
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: $SESS.add(...)
+          - pattern: $SESS.add_all(...)
+          - pattern: $SESS.delete(...)
+          - pattern: $SESS.delete_all(...)
+          - pattern: $SESS.merge(...)
+          - pattern: $SESS.commit(...)
+          - pattern: $SESS.flush(...)
+      - metavariable-regex:
+          metavariable: $SESS
+          regex: ^(session|Session|sess|db)$
+    message: 'kgb-json {"t":"resource","cat":"database","op":"write"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-session-read
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: $SESS.query(...)
+          - pattern: $SESS.get(...)
+          - pattern: $SESS.filter_by(...)
+          - pattern: $SESS.filter(...)
+      - metavariable-regex:
+          metavariable: $SESS
+          regex: ^(session|Session|sess|db)$
+    message: 'kgb-json {"t":"resource","cat":"database","op":"read"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-sqlite-connect
+    languages: [python]
+    severity: INFO
+    pattern: sqlite3.connect($URL, ...)
+    message: 'kgb-json {"t":"resource","cat":"database","u":$URL,"name":"sqlite"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-mongo-client
+    languages: [python]
+    severity: INFO
+    pattern-either:
+      - pattern: pymongo.MongoClient(...)
+      - pattern: AsyncIOMotorClient(...)
+    message: 'kgb-json {"t":"resource","cat":"database","name":"mongodb"}'
+    metadata:
+      kgb_type: resource
+
+  # ------------------------------------------------------ Cursor-level DB API
+  # Read/write symmetry: ``execute`` alone says nothing -- the SQL verb decides
+  # (a bare execute without a matching verb literal yields no finding at all).
+  - id: kgb-db-cursor-write
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.execute($SQL, ...)
+          - pattern: $CUR.executemany($SQL, ...)
+      - metavariable-regex:
+          metavariable: $CUR
+          regex: ^(cur|cursor|c)$
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?i)\s*['\"]\s*(UPDATE|INSERT|DELETE|CREATE|DROP|ALTER|REPLACE)
+    message: 'kgb-json {"t":"resource","cat":"database","op":"write"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-cursor-select
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern: $CUR.execute($SQL, ...)
+      - metavariable-regex:
+          metavariable: $CUR
+          regex: ^(cur|cursor|c)$
+      - metavariable-regex:
+          metavariable: $SQL
+          regex: (?i)\s*r?['\"]\s*(SELECT|SHOW|DESCRIBE|EXPLAIN|PRAGMA)
+    message: 'kgb-json {"t":"resource","cat":"database","op":"read"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-cursor-read
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: $CUR.fetchone(...)
+          - pattern: $CUR.fetchall(...)
+      - metavariable-regex:
+          metavariable: $CUR
+          regex: ^(cur|cursor|c)$
+    message: 'kgb-json {"t":"resource","cat":"database","op":"read"}'
+    metadata:
+      kgb_type: resource
+
+  # ------------------------------------------------------ Repository / DAO classes
+  # Split by method-name shape so we can emit READS / WRITES (not just DEPENDS_ON).
+  - id: kgb-db-repo-write
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern: self.$REPO.$METHOD(...)
+      - metavariable-regex:
+          metavariable: $REPO
+          regex: .*(repo|Repo|repository|Repository|dao|Dao)$
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(save|insert|create|update|delete|add|commit|persist|put|patch|upsert|store|write|remove|drop)
+    message: 'kgb-json {"t":"resource","cat":"database","op":"write","name":"$REPO"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-repo-read
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern: self.$REPO.$METHOD(...)
+      - metavariable-regex:
+          metavariable: $REPO
+          regex: .*(repo|Repo|repository|Repository|dao|Dao)$
+      - metavariable-regex:
+          metavariable: $METHOD
+          regex: ^(find|get|query|fetch|read|select|list|all|count|exists|first|last|load)
+    message: 'kgb-json {"t":"resource","cat":"database","op":"read","name":"$REPO"}'
+    metadata:
+      kgb_type: resource
+
+  # Generic fallback (no op inferred) -- deduped by the mapping layer against
+  # the more specific write/read entries above.
+  # NOTE: metavariable-regex is only honoured inside a `patterns:` group --
+  # as a top-level sibling of `pattern` it would be silently ignored, causing
+  # the rule to match *any* self.<field>.<method>() call (services included).
+  - id: kgb-db-repo-any
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern: self.$REPO.$METHOD(...)
+      - metavariable-regex:
+          metavariable: $REPO
+          regex: .*(repo|Repo|repository|Repository|dao|Dao)$
+    message: 'kgb-json {"t":"resource","cat":"database","name":"$REPO"}'
+    metadata:
+      kgb_type: resource
+
+  # ------------------------------------------------------ External HTTP clients
+  # Concrete URL literal (when the callee is called with a plain string)
+  - id: kgb-ext-httpx-url
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: httpx.$METHOD("$URL", ...)
+          - pattern: httpx.request(..., url="$URL", ...)
+    message: 'kgb-json {"t":"resource","cat":"external_service","name":"httpx","u":"$URL"}'
+    metadata:
+      kgb_type: resource
+
+  # Any httpx verb call -- fires even when URL is dynamic (f-string / variable).
+  - id: kgb-ext-httpx-generic
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: httpx.get(...)
+          - pattern: httpx.post(...)
+          - pattern: httpx.put(...)
+          - pattern: httpx.delete(...)
+          - pattern: httpx.patch(...)
+          - pattern: httpx.request(...)
+          - pattern: httpx.AsyncClient(...)
+    message: 'kgb-json {"t":"resource","cat":"external_service","name":"httpx"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-ext-requests-url
+    languages: [python]
+    severity: INFO
+    pattern: requests.$METHOD("$URL", ...)
+    message: 'kgb-json {"t":"resource","cat":"external_service","name":"requests","u":"$URL"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-ext-requests-generic
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: requests.get(...)
+          - pattern: requests.post(...)
+          - pattern: requests.put(...)
+          - pattern: requests.delete(...)
+          - pattern: requests.patch(...)
+          - pattern: requests.request(...)
+    message: 'kgb-json {"t":"resource","cat":"external_service","name":"requests"}'
+    metadata:
+      kgb_type: resource
+
+  # ------------------------------------------------------ Message queue
+  - id: kgb-mq-publish
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: $PUB.publish(...)
+          - pattern: $PUB.send(...)
+      - metavariable-regex:
+          metavariable: $PUB
+          regex: (?i).*(kafka|producer|publisher|pubsub|rabbit|celery|sqs).*
+    message: 'kgb-json {"t":"resource","cat":"message_queue","op":"publish","name":"$PUB"}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-mq-subscribe
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: $SUB.receive(...)
+          - pattern: $SUB.pull(...)
+          - pattern: $SUB.consume(...)
+          - pattern: $SUB.poll(...)
+      - metavariable-regex:
+          metavariable: $SUB
+          regex: (?i).*(kafka|consumer|subscriber|rabbit|celery|sqs).*
+    message: 'kgb-json {"t":"resource","cat":"message_queue","op":"subscribe","name":"$SUB"}'
+    metadata:
+      kgb_type: resource
+
+  # ------------------------------------------------------ Misc caches
+  - id: kgb-cache-memcached
+    languages: [python]
+    severity: INFO
+    pattern-either:
+      - pattern: memcache.Client(...)
+      - pattern: pylibmc.Client(...)
+    message: 'kgb-json {"t":"resource","cat":"cache","name":"memcached"}'
+    metadata:
+      kgb_type: resource

@@ -1,0 +1,323 @@
+# HTTP-route rules (Semgrep YAML).
+#
+# Contract with the runner (kg_builder.collectors.code.semgrep_runner):
+#   * metadata.kgb_type == "route"         -> pre-filters findings by category
+#   * message                              -> "kgb-json <payload>"
+#   * <payload>                            -> JSON object with keys
+#       t   : "route"
+#       m   : HTTP method (GET/POST/PUT/DELETE/PATCH/ANY)
+#       p   : route path (JSON string, interpolated from $PATH)
+#       h   : handler function name (JSON string, from $HANDLER)
+#       fw  : framework tag
+#
+# Semgrep's --json output hides `extra.metavars` behind a "requires login"
+# gate, but *message* interpolation is still fully populated -- so we encode
+# every value we need into a JSON message payload the runner can parse.
+rules:
+  # ------------------------------------------------------- Python (FastAPI / Flask)
+  - id: kgb-route-py-get
+    languages: [python]
+    severity: INFO
+    pattern: |
+      @$ROUTER.get($PATH, ...)
+      def $HANDLER(...):
+        ...
+    message: 'kgb-json {"t":"route","m":"GET","p":$PATH,"h":"$HANDLER","fw":"fastapi/flask"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-py-post
+    languages: [python]
+    severity: INFO
+    pattern: |
+      @$ROUTER.post($PATH, ...)
+      def $HANDLER(...):
+        ...
+    message: 'kgb-json {"t":"route","m":"POST","p":$PATH,"h":"$HANDLER","fw":"fastapi/flask"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-py-put
+    languages: [python]
+    severity: INFO
+    pattern: |
+      @$ROUTER.put($PATH, ...)
+      def $HANDLER(...):
+        ...
+    message: 'kgb-json {"t":"route","m":"PUT","p":$PATH,"h":"$HANDLER","fw":"fastapi/flask"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-py-delete
+    languages: [python]
+    severity: INFO
+    pattern: |
+      @$ROUTER.delete($PATH, ...)
+      def $HANDLER(...):
+        ...
+    message: 'kgb-json {"t":"route","m":"DELETE","p":$PATH,"h":"$HANDLER","fw":"fastapi/flask"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-py-patch
+    languages: [python]
+    severity: INFO
+    pattern: |
+      @$ROUTER.patch($PATH, ...)
+      def $HANDLER(...):
+        ...
+    message: 'kgb-json {"t":"route","m":"PATCH","p":$PATH,"h":"$HANDLER","fw":"fastapi/flask"}'
+    metadata:
+      kgb_type: route
+
+  # Flask-style @app.route("/x") -- method comes from a kwarg we can't reliably
+  # extract from a single pattern, so record as ANY.
+  - id: kgb-route-py-flask-route
+    languages: [python]
+    severity: INFO
+    pattern: |
+      @$ROUTER.route($PATH, ...)
+      def $HANDLER(...):
+        ...
+    message: 'kgb-json {"t":"route","m":"ANY","p":$PATH,"h":"$HANDLER","fw":"flask"}'
+    metadata:
+      kgb_type: route
+
+  # --------------------------------------------------------- Java (Spring)
+  # Bare (`@GetMapping("/x")`) and named (`value=`/`path=`) argument forms both
+  # need explicit branches -- a positional $PATH does not match an element-value
+  # pair. Known limitation: class-level @RequestMapping("/base") prefixes are not
+  # concatenated, so paths here are method-level only (affects HTTP-bridge matching).
+  - id: kgb-route-java-get
+    languages: [java]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @GetMapping($PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @GetMapping(value = $PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @GetMapping(path = $PATH)
+              $RET $HANDLER(...) { ... }
+    message: 'kgb-json {"t":"route","m":"GET","p":$PATH,"h":"$HANDLER","fw":"spring"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-java-post
+    languages: [java]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @PostMapping($PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @PostMapping(value = $PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @PostMapping(path = $PATH)
+              $RET $HANDLER(...) { ... }
+    message: 'kgb-json {"t":"route","m":"POST","p":$PATH,"h":"$HANDLER","fw":"spring"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-java-put
+    languages: [java]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @PutMapping($PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @PutMapping(value = $PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @PutMapping(path = $PATH)
+              $RET $HANDLER(...) { ... }
+    message: 'kgb-json {"t":"route","m":"PUT","p":$PATH,"h":"$HANDLER","fw":"spring"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-java-delete
+    languages: [java]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @DeleteMapping($PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @DeleteMapping(value = $PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @DeleteMapping(path = $PATH)
+              $RET $HANDLER(...) { ... }
+    message: 'kgb-json {"t":"route","m":"DELETE","p":$PATH,"h":"$HANDLER","fw":"spring"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-java-request
+    languages: [java]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: |
+              @RequestMapping($PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @RequestMapping(value = $PATH)
+              $RET $HANDLER(...) { ... }
+          - pattern: |
+              @RequestMapping(path = $PATH)
+              $RET $HANDLER(...) { ... }
+    message: 'kgb-json {"t":"route","m":"ANY","p":$PATH,"h":"$HANDLER","fw":"spring"}'
+    metadata:
+      kgb_type: route
+
+  # --------------------------------------------------------- JS / TS (Express)
+  # ``..., $HANDLER, ...`` tolerates middleware args before the handler; the
+  # identifier regex excludes inline functions (those routes yield no finding --
+  # a garbage handler name would be worse). When several named handlers are
+  # chained, Semgrep reports them all and the first one wins downstream.
+  - id: kgb-route-js-get
+    languages: [javascript, typescript]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.get($PATH, ..., $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_$][A-Za-z0-9_$]*$
+    message: 'kgb-json {"t":"route","m":"GET","p":$PATH,"h":"$HANDLER","fw":"express"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-js-post
+    languages: [javascript, typescript]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.post($PATH, ..., $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_$][A-Za-z0-9_$]*$
+    message: 'kgb-json {"t":"route","m":"POST","p":$PATH,"h":"$HANDLER","fw":"express"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-js-put
+    languages: [javascript, typescript]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.put($PATH, ..., $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_$][A-Za-z0-9_$]*$
+    message: 'kgb-json {"t":"route","m":"PUT","p":$PATH,"h":"$HANDLER","fw":"express"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-js-delete
+    languages: [javascript, typescript]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.delete($PATH, ..., $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_$][A-Za-z0-9_$]*$
+    message: 'kgb-json {"t":"route","m":"DELETE","p":$PATH,"h":"$HANDLER","fw":"express"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-js-patch
+    languages: [javascript, typescript]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.patch($PATH, ..., $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_$][A-Za-z0-9_$]*$
+    message: 'kgb-json {"t":"route","m":"PATCH","p":$PATH,"h":"$HANDLER","fw":"express"}'
+    metadata:
+      kgb_type: route
+
+  # --------------------------------------------------------- Go (Gin / Echo)
+  # Both frameworks use the same uppercase-verb call shape, hence the joint tag.
+  - id: kgb-route-go-get
+    languages: [go]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.GET($PATH, $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_][A-Za-z0-9_]*$
+    message: 'kgb-json {"t":"route","m":"GET","p":$PATH,"h":"$HANDLER","fw":"gin/echo"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-go-post
+    languages: [go]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.POST($PATH, $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_][A-Za-z0-9_]*$
+    message: 'kgb-json {"t":"route","m":"POST","p":$PATH,"h":"$HANDLER","fw":"gin/echo"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-go-put
+    languages: [go]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.PUT($PATH, $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_][A-Za-z0-9_]*$
+    message: 'kgb-json {"t":"route","m":"PUT","p":$PATH,"h":"$HANDLER","fw":"gin/echo"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-go-delete
+    languages: [go]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.DELETE($PATH, $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_][A-Za-z0-9_]*$
+    message: 'kgb-json {"t":"route","m":"DELETE","p":$PATH,"h":"$HANDLER","fw":"gin/echo"}'
+    metadata:
+      kgb_type: route
+
+  - id: kgb-route-go-any
+    languages: [go]
+    severity: INFO
+    patterns:
+      - pattern: $ROUTER.Any($PATH, $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_][A-Za-z0-9_]*$
+    message: 'kgb-json {"t":"route","m":"ANY","p":$PATH,"h":"$HANDLER","fw":"gin/echo"}'
+    metadata:
+      kgb_type: route
+
+  # ------------------------------------------------------------- Python (Django)
+  # urlpatterns entries: path("x", view) / re_path(r"^x$", view). Method is not
+  # encoded in URLs.py (dispatch happens in the view), so recorded as ANY.
+  - id: kgb-route-django-path
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern-either:
+          - pattern: path($PATH, $HANDLER, ...)
+          - pattern: re_path($PATH, $HANDLER, ...)
+      - metavariable-regex:
+          metavariable: $HANDLER
+          regex: ^[A-Za-z_][A-Za-z0-9_.]*$
+    message: 'kgb-json {"t":"route","m":"ANY","p":$PATH,"h":"$HANDLER","fw":"django"}'
+    metadata:
+      kgb_type: route

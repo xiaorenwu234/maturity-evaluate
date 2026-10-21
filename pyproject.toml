@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kg_builder"
+version = "0.1.0"
+description = "Module 1 of the maturity-evaluation project: Data Collection & Unified System Knowledge Graph construction."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+dependencies = [
+    "networkx>=3.0,<3.5",
+    "pydantic>=2.0,<3.0",
+    "pydantic-settings>=2.0,<3.0",
+    "click>=8.0,<9.0",
+    "PyYAML>=6.0,<7.0",
+    # LLM semantic enrichment is mandatory (OpenAI-compatible endpoint via LangChain).
+    "langchain>=0.2,<0.4",
+    "langchain-openai>=0.1,<0.3",
+]
+
+[project.optional-dependencies]
+# Multi-language AST (JS/TS/Java/Go). Required for those languages -- there is no
+# regex fallback; a language without a loaded grammar is skipped with a warning.
+treesitter = ["tree-sitter>=0.21,<0.24", "tree-sitter-language-pack>=0.1.0"]
+# Semgrep drives framework / resource / config enrichment (routes, DB calls,
+# HTTP clients, env-var reads). Replaces the previous in-house regex heuristics.
+# When missing, enrichment is skipped with a warning -- the same "no fallback"
+# contract that tree-sitter already enforces for non-Python files.
+semgrep = ["semgrep>=1.60"]
+# Open-source code analysis stack (scip-python + radon + tree-sitter).
+# Replaces the legacy CodeCollector when code_analysis.enabled=true in config.
+code_analysis = ["scip>=0.4", "radon>=6.0", "tree-sitter>=0.21,<0.24", "tree-sitter-python>=0.21", "tree-sitter-java>=0.21"]
+# Deployment collector (Kubernetes). Stub now; wire the real client later.
+k8s = ["kubernetes>=28.0"]
+# Import the built graph into a live Neo4j (`kgb export-neo4j`).
+neo4j = ["neo4j>=5.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+kgb = "kg_builder.cli:cli"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Ship the Semgrep YAML rule files inside the installed wheel so `kgb build`
+# works from any working directory.
+[tool.setuptools.package-data]
+"kg_builder.collectors.code" = ["semgrep_rules/*.yaml"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

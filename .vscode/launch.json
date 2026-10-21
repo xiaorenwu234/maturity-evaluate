@@ -1,0 +1,80 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "kgb build (sample_repo)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "kg_builder.cli",
+            "args": [
+                "build",
+                "examples/sample_repo",
+                "-o", "out/knowledge_graph.json",
+                "--skip-enrichment",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "PATH": "${workspaceFolder}/node_modules/.bin:/home/xueht/bin/joern/joern-cli/bin:/home/xueht/miniconda3/envs/toolsafe/bin:${env:PATH}"
+            }
+        },
+        {
+            "name": "kgb build (comprehensive_test_repo/python)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "kg_builder.cli",
+            "args": [
+                "build",
+                "examples/comprehensive_test_repo/python_app",
+                "-o", "out/comprehensive_python_graph.json",
+                "--skip-enrichment",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "PATH": "${workspaceFolder}/node_modules/.bin:/home/xueht/bin/joern/joern-cli/bin:/home/xueht/miniconda3/envs/toolsafe/bin:${env:PATH}"
+            }
+        },
+        {
+            "name": "kgb build (comprehensive_test_repo/java)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "kg_builder.cli",
+            "args": [
+                "build",
+                "examples/comprehensive_test_repo/java_app",
+                "-o", "out/comprehensive_java_graph.json",
+                "--skip-enrichment",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "PATH": "${workspaceFolder}/node_modules/.bin:/home/xueht/bin/joern/joern-cli/bin:/home/xueht/miniconda3/envs/toolsafe/bin:${env:PATH}"
+            }
+        },
+        {
+            "name": "kgb build (with enrichment)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "kg_builder.cli",
+            "args": [
+                "build",
+                "examples/sample_repo",
+                "-o", "out/knowledge_graph_enriched.json",
+                "-v"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src",
+                "PATH": "${workspaceFolder}/node_modules/.bin:/home/xueht/bin/joern/joern-cli/bin:/home/xueht/miniconda3/envs/toolsafe/bin:${env:PATH}"
+            }
+        }
+    ]
+}

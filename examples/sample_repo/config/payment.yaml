@@ -1,0 +1,11 @@
+# PaymentService runtime configuration
+PaymentService:
+  timeout_seconds: 3
+  retry_limit: 5
+  gateway_url: https://stripe.internal/v1
+  feature_flags:
+    async_refund: false
+RedisCache:
+  host: redis.internal
+  port: 6379
+  ttl_seconds: 120

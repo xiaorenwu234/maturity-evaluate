@@ -1,0 +1,65 @@
+# Example configuration for `kgb build --config config.yaml`
+# Precedence (later wins): this file < KGB_* env vars < CLI overrides.
+
+# Graph namespace (repo / tenant id). Optional.
+namespace: ""
+
+# Output JSON path can also be set here (CLI -o wins).
+# output_path: out/knowledge_graph.json
+
+# Run LLM semantic enrichment (default: true). Set false to build structure only.
+enrich: true
+
+# --- Semantic enrichment: OpenAI-compatible endpoint via LangChain ---
+# No heuristic fallback: when enrich is true these MUST be provided or the build fails.
+llm:
+  provider: openai
+  model: gpt-4o-mini                       # e.g. qwen-max, deepseek-chat, ...
+  base_url: https://api.openai.com/v1      # point at any OpenAI-compatible gateway
+  api_key: sk-xxxx                         # or set env KGB_LLM__API_KEY / OPENAI_API_KEY
+  temperature: 0
+  # max_output_tokens: 2048
+  request_timeout: 60
+  json_mode: true                          # request response_format=json_object
+  max_items_per_call: 40                   # entities described per model call
+
+# --- Source-code collector (Python via stdlib ast; JS/TS/Java/Go via Tree-sitter) ---
+code:
+  enabled: true
+  languages: ["auto"]
+  exclude_dirs:
+    - node_modules
+    - .git
+    - venv
+    - .venv
+    - __pycache__
+    - dist
+    - build
+    - target
+    - vendor
+  max_file_bytes: 512000
+
+# --- Open-source code collector (scip-python + radon + tree-sitter) ---
+# When enabled, replaces the legacy CodeCollector entirely.
+# Requires: pip install -e ".[code_analysis]" and Node.js >= 16 for scip-python.
+# Hard-failure: collection aborts if any toolkit is missing.
+code_analysis:
+  enabled: false
+
+# --- Document collector (architecture / interface / config docs) ---
+document:
+  enabled: true
+
+# --- Deployment collector (Kubernetes) — currently a STUB ---
+deployment:
+  enabled: false
+  kubeconfig: null
+  context: null
+  namespaces: []
+  cluster_name: default
+
+# --- Runtime metrics / logs / traces collector — currently a STUB ---
+runtime:
+  enabled: false
+  prometheus_url: null
+  trace_backend: null

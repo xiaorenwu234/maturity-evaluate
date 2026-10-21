@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------------------
+# Module 1: Data Collection & Knowledge Graph Modeling
+# Install into the CMMeter conda env:  conda run -n CMMeter pip install -e .
+# ---------------------------------------------------------------------------
+
+# Unified graph data structure + graph algorithms
+networkx>=3.0,<3.5
+
+# Schema validation & settings management
+pydantic>=2.0,<3.0
+pydantic-settings>=2.0,<3.0
+
+# CLI entrypoint
+click>=8.0,<9.0
+
+# YAML config file / document parsing
+PyYAML>=6.0,<7.0
+
+# LLM semantic enrichment is MANDATORY (no heuristic fallback).
+# Any OpenAI-compatible endpoint works via LangChain (set llm.base_url in config).
+langchain>=0.2,<0.4
+langchain-openai>=0.1,<0.3
+
+# ---------------------------------------------------------------------------
+# Optional: multi-language AST via Tree-sitter (JS / TS / Java / Go).
+# Required for those languages -- there is NO regex fallback; a language whose
+# grammar is unavailable is skipped with a warning. Python uses stdlib `ast`.
+#   conda run -n CMMeter pip install -e ".[treesitter]"
+# ---------------------------------------------------------------------------
+# tree-sitter>=0.21,<0.24
+# tree-sitter-language-pack>=0.1.0
+
+# ---------------------------------------------------------------------------
+# Optional: deployment collector (Kubernetes). Kept out of the core install
+# because this module ships deployment collection as a stub.
+# ---------------------------------------------------------------------------
+# kubernetes>=28.0
+
+# ---------------------------------------------------------------------------
+# Optional: import the built graph into a live Neo4j (`kgb export-neo4j`).
+#   conda run -n CMMeter pip install -e ".[neo4j]"
+# ---------------------------------------------------------------------------
+# neo4j>=5.0
+
+# ---- Dev / test ----
+pytest>=7.0
