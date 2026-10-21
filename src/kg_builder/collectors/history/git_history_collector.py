@@ -27,7 +27,7 @@ from ...config import BuildSettings
 from ...graph.model import KGEdge, KGNode, Provenance, make_node_id
 from ...graph.ontology import NodeType, RelationType, SourceType
 from ..base import BaseCollector, CollectorResult
-from ..code.languages import detect_language
+from ..code.enrichment.languages import detect_language
 
 _CONFIDENCE = 0.85
 

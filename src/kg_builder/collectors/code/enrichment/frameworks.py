@@ -27,7 +27,7 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-from .artifact import (
+from ..schema.artifact import (
     ConfigRef,
     FileArtifact,
     ResourceRef,

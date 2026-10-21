@@ -24,7 +24,7 @@ from __future__ import annotations
 import ast
 from typing import Optional
 
-from ..code.artifact import (
+from ..schema.artifact import (
     ArgHint, CallRef, ClassDef, FileArtifact, FunctionDef, ImportRef, Metrics,
 )
 from . import cfg_builder, clone_detector, metrics_adapter

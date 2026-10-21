@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from ...code.artifact import (
+from ..schema.artifact import (
     ArgHint, CallRef, ClassDef, FileArtifact, FunctionDef, ImportRef, Metrics,
 )
 from .cpg_parser import JavaCallIndex, resolve_java_call

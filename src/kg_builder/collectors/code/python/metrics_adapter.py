@@ -15,7 +15,7 @@ from __future__ import annotations
 import ast
 from typing import Optional
 
-from ..code.artifact import Metrics
+from ..schema.artifact import Metrics
 
 
 def _safe_cc(source: str) -> dict[str, int]:

@@ -19,13 +19,13 @@ from ...config import BuildSettings
 from ...graph.model import KGEdge, KGNode, Provenance, make_node_id
 from ...graph.ontology import NodeType, RelationType, SourceType
 from ..base import BaseCollector, CollectorResult
-from ..code.artifact import CallRef, FileArtifact
-from ..code.frameworks import enrich_all
-from . import status as toolkit_status
-from .clone_detector import CLONE_MIN_TOKENS
-from .ir_compat import build_artifact
-from .scip_resolver import ScipIndex
-from .scip_runner import ScipIndexError, index_repo
+from .schema.artifact import CallRef, FileArtifact
+from .enrichment.frameworks import enrich_all
+from .python import status as toolkit_status
+from .python.clone_detector import CLONE_MIN_TOKENS
+from .python.ir_compat import build_artifact
+from .python.scip_resolver import ScipIndex
+from .python.scip_runner import ScipIndexError, index_repo
 
 
 _SERVICE_SUFFIXES = ("Service", "Controller", "Router", "Resource", "Api", "API", "Handler", "Manager")
@@ -75,7 +75,7 @@ class CodeCollector(BaseCollector):
         if has_python:
             try:
                 scip_path = index_repo(self.repo)
-                from .scip_resolver import load_index
+                from .python.scip_resolver import load_index
                 scip_index = load_index(scip_path, self.repo)
             except ScipIndexError as exc:
                 raise RuntimeError(f"code collector: SCIP indexing failed: {exc}") from exc

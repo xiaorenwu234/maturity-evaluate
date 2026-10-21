@@ -1,6 +1,6 @@
-"""Deployment collector package (Kubernetes / cloud)."""
+"""Deployment collector package (Kubernetes / Alibaba Cloud)."""
 from __future__ import annotations
 
-from .k8s_collector import DeploymentCollector
+from .collector import DeploymentCollector
 
 __all__ = ["DeploymentCollector"]

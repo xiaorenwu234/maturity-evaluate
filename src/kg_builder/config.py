@@ -61,18 +61,131 @@ class DocumentSettings(BaseModel):
     max_file_bytes: int = 1_000_000
 
 
-class DeploymentSettings(BaseModel):
-    """Deployment (Kubernetes / cloud) collector settings.
+class CloudProductSettings(BaseModel):
+    """Generic cloud product toggle with optional region override."""
 
-    NOTE: collection itself is currently a STUB (see collectors/deployment). The
-    fields are defined now so wiring a real Kubernetes client later is a drop-in.
+    enabled: bool = False
+    region: Optional[str] = None  # override top-level aliyun_region
+
+
+class RdsSettings(CloudProductSettings):
+    """RDS collector settings."""
+
+    instance_ids: list[str] = Field(default_factory=list)
+
+
+class OssSettings(CloudProductSettings):
+    """OSS collector settings."""
+
+    bucket_names: list[str] = Field(default_factory=list)
+
+
+class SlsSettings(CloudProductSettings):
+    """SLS (Log Service) collector settings."""
+
+    project: str = ""
+    logstores: list[str] = Field(default_factory=list)
+
+
+class RosSettings(CloudProductSettings):
+    """ROS (Resource Orchestration) collector settings."""
+
+    stack_names: list[str] = Field(default_factory=list)
+
+
+class AcrSettings(CloudProductSettings):
+    """ACR (Container Registry) collector settings."""
+
+    instance_ids: list[str] = Field(default_factory=list)
+    otel_only: bool = True
+
+
+class AlbSettings(CloudProductSettings):
+    """ALB (Application Load Balancer) collector settings."""
+
+    load_balancer_ids: list[str] = Field(default_factory=list)
+
+
+class FcSettings(CloudProductSettings):
+    """FC (Function Compute) collector settings."""
+
+    function_names: list[str] = Field(default_factory=list)
+
+
+class EventBridgeSettings(CloudProductSettings):
+    """EventBridge collector settings."""
+
+    bus_names: list[str] = Field(default_factory=list)
+
+
+class GrafanaSettings(BaseModel):
+    """Grafana collector settings (non-Alibaba SDK, direct HTTP API)."""
+
+    enabled: bool = False
+    url: str = ""
+    workspace_id: str = ""
+    api_token_env: str = "GRAFANA_API_TOKEN"  # env var name holding the token
+    folder_ids: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class TairSettings(CloudProductSettings):
+    """Tair / Redis collector settings."""
+
+    instance_ids: list[str] = Field(default_factory=list)
+
+
+class CodeupSettings(BaseModel):
+    """Codeup (Yunxiao DevOps) collector settings."""
+
+    enabled: bool = False
+    org_id: str = ""
+    project_name: str = ""
+    yunxiao_token_env: str = "YUNXIAO_TOKEN"  # env var name
+    repo_ids: list[str] = Field(default_factory=list)
+    pipeline_ids: list[str] = Field(default_factory=list)
+
+
+class DeploymentSettings(BaseModel):
+    """Deployment (Kubernetes / Alibaba Cloud) collector settings.
+
+    Supports K8s (ACK) and 16 Alibaba Cloud products. Credentials are read
+    from environment variables ``ALIBABA_CLOUD_ACCESS_KEY_ID`` /
+    ``ALIBABA_CLOUD_ACCESS_KEY_SECRET`` by default, or can be set inline.
     """
 
     enabled: bool = False
+
+    # --- K8s / ACK ---
     kubeconfig: Optional[str] = None
+    kubeconfig_paths: list[str] = Field(default_factory=list)
     context: Optional[str] = None
     namespaces: list[str] = Field(default_factory=list)  # empty -> all
     cluster_name: str = "default"
+    cluster_id: Optional[str] = None  # ACK cluster ID
+
+    # --- Alibaba Cloud credentials ---
+    aliyun_region: str = "cn-hongkong"
+    aliyun_access_key_id: Optional[str] = None   # prefer env ALIBABA_CLOUD_ACCESS_KEY_ID
+    aliyun_access_key_secret: Optional[str] = None  # prefer env ALIBABA_CLOUD_ACCESS_KEY_SECRET
+    aliyun_account_id: Optional[str] = None
+
+    # --- Cloud product toggles & params ---
+    ecs: CloudProductSettings = Field(default_factory=CloudProductSettings)
+    rds: RdsSettings = Field(default_factory=RdsSettings)
+    oss: OssSettings = Field(default_factory=OssSettings)
+    sls: SlsSettings = Field(default_factory=SlsSettings)
+    cms: CloudProductSettings = Field(default_factory=CloudProductSettings)
+    ros: RosSettings = Field(default_factory=RosSettings)
+    acr: AcrSettings = Field(default_factory=AcrSettings)
+    alb: AlbSettings = Field(default_factory=AlbSettings)
+    arms: CloudProductSettings = Field(default_factory=CloudProductSettings)
+    fc: FcSettings = Field(default_factory=FcSettings)
+    eventbridge: EventBridgeSettings = Field(default_factory=EventBridgeSettings)
+    grafana: GrafanaSettings = Field(default_factory=GrafanaSettings)
+    gtm: CloudProductSettings = Field(default_factory=CloudProductSettings)
+    tair: TairSettings = Field(default_factory=TairSettings)
+    codeup: CodeupSettings = Field(default_factory=CodeupSettings)
 
 
 class RuntimeSettings(BaseModel):

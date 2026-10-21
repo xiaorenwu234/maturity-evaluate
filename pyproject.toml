@@ -34,6 +34,23 @@ semgrep = ["semgrep>=1.60"]
 code_analysis = ["scip>=0.4", "radon>=6.0", "tree-sitter>=0.21,<0.24", "tree-sitter-python>=0.21", "tree-sitter-java>=0.21"]
 # Deployment collector (Kubernetes). Stub now; wire the real client later.
 k8s = ["kubernetes>=28.0"]
+# Alibaba Cloud SDK dependencies for deployment collector cloud product collectors.
+alicloud = [
+    "alibabacloud-credentials>=0.3",
+    "alibabacloud-ecs20140526>=3.0",
+    "alibabacloud-rds20140815>=3.0",
+    "alibabacloud-oss20190517>=1.0",
+    "alibabacloud-sls20201230>=3.0",
+    "alibabacloud-cms20190101>=8.0",
+    "alibabacloud-ros20190910>=3.0",
+    "alibabacloud-cr20181201>=2.0",
+    "alibabacloud-alb20200616>=1.0",
+    "alibabacloud-arms20190808>=2.0",
+    "alibabacloud-fc-open20210406>=2.0",
+    "alibabacloud-eventbridge20200401>=2.0",
+    "alibabacloud-devops20210625>=2.0",
+    "kubernetes>=28.0",
+]
 # Import the built graph into a live Neo4j (`kgb export-neo4j`).
 neo4j = ["neo4j>=5.0"]
 dev = ["pytest>=7.0"]
@@ -50,7 +67,7 @@ where = ["src"]
 # Ship the Semgrep YAML rule files inside the installed wheel so `kgb build`
 # works from any working directory.
 [tool.setuptools.package-data]
-"kg_builder.collectors.code" = ["semgrep_rules/*.yaml"]
+"kg_builder.collectors.code" = ["enrichment/semgrep_rules/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

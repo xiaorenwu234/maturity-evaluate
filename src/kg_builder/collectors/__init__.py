@@ -28,22 +28,17 @@ __all__ = [
 def build_collectors(settings: BuildSettings) -> list[BaseCollector]:
     """Instantiate all collectors (each decides via ``is_enabled()`` whether it runs).
 
-    The open-source code collector (SCIP/Joern-based) is used by default.
-    Set ``settings.code_analysis.enabled = False`` to disable code collection.
+    The open-source code collector (SCIP/Joern-based) is used when
+    ``settings.code_analysis.enabled`` is True. When disabled, code collection
+    is skipped entirely (no code nodes/edges in the graph).
     """
-    code_collector: BaseCollector
+    result: list[BaseCollector] = []
     if settings.code_analysis.enabled:
-        code_collector = CodeCollector(settings)
-    else:
-        # Code collection disabled
-        raise RuntimeError(
-            "Code collection is disabled. "
-            "Set code_analysis.enabled=true in config to enable code analysis."
-        )
-    return [
-        code_collector,
+        result.append(CodeCollector(settings))
+    result.extend([
         DocumentCollector(settings),
         DeploymentCollector(settings),
         RuntimeCollector(settings),
         HistoryCollector(settings),
-    ]
+    ])
+    return result

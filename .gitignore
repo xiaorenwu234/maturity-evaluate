@@ -47,3 +47,4 @@ deprecated/
 examples/sample_repo/__pycache__/
 examples/comprehensive_test_repo/**/__pycache__/
 pytest-of-xueht
+cloud-native-maturity-evaluate/

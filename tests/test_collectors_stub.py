@@ -22,32 +22,31 @@ def test_deployment_stub_collect_is_empty_and_warns():
     settings.deployment.enabled = True  # force-enable to exercise collect()
     collector = DeploymentCollector(settings)
     result = collector.collect()
-    # No live cluster -> empty nodes, explicit stub warning.
+    # No cloud products configured -> empty nodes, warning about no products.
     assert result.nodes == []
-    assert any("stub" in w for w in result.warnings)
+    assert any("no cloud products" in w for w in result.warnings)
 
 
-def test_deployment_mapping_produces_deployed_as_and_provenance():
+def test_deployment_records_to_graph_produces_nodes_and_provenance():
+    """Test the generic record-to-graph bridge with a mock record."""
+    from dataclasses import dataclass
+    from kg_builder.graph.ontology import SourceType
+
+    @dataclass
+    class EcsInstanceRecord:
+        instance_id: str = "i-test123"
+        instance_name: str = "test-server"
+        status: str = "Running"
+
     settings = settings_for(SAMPLE)
     collector = DeploymentCollector(settings)
-    wl = {
-        "service": "Payment",
-        "name": "payment",
-        "namespace": "prod",
-        "cluster": "prod-cluster",
-        "replicas": 1,
-        "readiness_probe": False,
-        "liveness_probe": False,
-        "region": "cn-north-1a",
-    }
-    res = collector.collect()  # empty (stub fetch)
-    collector._map_workload(res, wl)
-    deps = [n for n in res.nodes if n.type == NodeType.DEPLOYMENT.value]
-    assert deps
-    assert deps[0].attributes["replicas"] == 1
-    deployed_as = [e for e in res.edges if e.relation == RelationType.DEPLOYED_AS.value]
-    assert deployed_as
-    prov = deployed_as[0].provenance[0]
+    nodes, edges = collector._records_to_graph([EcsInstanceRecord()], "ecs")
+
+    assert len(nodes) == 1
+    assert nodes[0].type == "Infrastructure"
+    assert nodes[0].name == "test-server"
+    assert nodes[0].attributes["cloud_provider"] == "alibaba"
+    prov = nodes[0].provenance[0]
     assert prov.source_type == SourceType.DEPLOYMENT.value
     assert prov.confidence == 1.0
 

@@ -25,19 +25,19 @@ def _ts_available() -> bool:
 
 class TestStatusProbes:
     def test_radon_status_returns_tuple(self):
-        from kg_builder.collectors.code.status import radon_status
+        from kg_builder.collectors.code.python.status import radon_status
         ok, detail = radon_status()
         assert isinstance(ok, bool)
         assert isinstance(detail, str)
 
     def test_treesitter_status_returns_tuple(self):
-        from kg_builder.collectors.code.status import treesitter_python_status
+        from kg_builder.collectors.code.python.status import treesitter_python_status
         ok, detail = treesitter_python_status()
         assert isinstance(ok, bool)
         assert isinstance(detail, str)
 
     def test_check_all_returns_four_keys(self):
-        from kg_builder.collectors.code.status import check_all
+        from kg_builder.collectors.code.python.status import check_all
         result = check_all()
         assert set(result.keys()) == {"scip", "radon", "treesitter_python", "joern"}
 
@@ -48,22 +48,22 @@ class TestStatusProbes:
 
 class TestScipResolver:
     def test_symbol_to_qname_function(self):
-        from kg_builder.collectors.code.scip_resolver import _symbol_to_qname
+        from kg_builder.collectors.code.python.scip_resolver import _symbol_to_qname
         sym = "scip-python python kg_builder 0.1.0 `examples.sample_repo.services.order_service`.OrderService#create_order.(self"
         assert _symbol_to_qname(sym) == "examples.sample_repo.services.order_service.OrderService.create_order"
 
     def test_symbol_to_qname_class(self):
-        from kg_builder.collectors.code.scip_resolver import _symbol_to_qname
+        from kg_builder.collectors.code.python.scip_resolver import _symbol_to_qname
         sym = "scip-python python kg_builder 0.1.0 `examples.sample_repo.services.order_service`.OrderService."
         assert _symbol_to_qname(sym) == "examples.sample_repo.services.order_service.OrderService"
 
     def test_symbol_to_qname_module_level(self):
-        from kg_builder.collectors.code.scip_resolver import _symbol_to_qname
+        from kg_builder.collectors.code.python.scip_resolver import _symbol_to_qname
         sym = "scip-python python kg_builder 0.1.0 `examples.sample_repo.services.helpers`.fmt_order_id."
         assert _symbol_to_qname(sym) == "examples.sample_repo.services.helpers.fmt_order_id"
 
     def test_resolve_call_returns_none_on_miss(self):
-        from kg_builder.collectors.code.scip_resolver import ScipIndex, resolve_call
+        from kg_builder.collectors.code.python.scip_resolver import ScipIndex, resolve_call
         idx = ScipIndex()  # empty index
         assert resolve_call(idx, "foo.py", 10, "bar") is None
 
@@ -74,7 +74,7 @@ class TestScipResolver:
 
 class TestMetricsAdapter:
     def test_compute_function_metrics_cc(self):
-        from kg_builder.collectors.code.metrics_adapter import compute_function_metrics
+        from kg_builder.collectors.code.python.metrics_adapter import compute_function_metrics
         src = "def foo(x):\n    if x > 0:\n        return x\n    return -x\n"
         m = compute_function_metrics(src, "foo")
         # radon should assign CC >= 2 for this function (one branch).
@@ -82,7 +82,7 @@ class TestMetricsAdapter:
             assert m.cyclomatic_complexity >= 2
 
     def test_compute_function_metrics_leaves_unsupported_none(self):
-        from kg_builder.collectors.code.metrics_adapter import compute_function_metrics
+        from kg_builder.collectors.code.python.metrics_adapter import compute_function_metrics
         src = "def bar(): pass\n"
         m = compute_function_metrics(src, "bar")
         # num_fields / self_data_access are AST-supplemented, not radon.
@@ -90,7 +90,7 @@ class TestMetricsAdapter:
         assert m.self_data_access is None
 
     def test_file_loc_counts_nonblank_noncomment(self):
-        from kg_builder.collectors.code.metrics_adapter import file_loc
+        from kg_builder.collectors.code.python.metrics_adapter import file_loc
         src = "# comment\n\ndef foo():\n    pass\n"
         assert file_loc(src) == 2  # def + pass
 
@@ -104,7 +104,7 @@ class TestMetricsAdapter:
 )
 class TestCfgBuilder:
     def test_build_cfg_returns_schema(self):
-        from kg_builder.collectors.code.cfg_builder import build_cfg
+        from kg_builder.collectors.code.python.cfg_builder import build_cfg
         src = "def foo(x):\n    if x:\n        return 1\n    return 0\n"
         cfg = build_cfg(src, "foo")
         assert cfg is not None
@@ -113,7 +113,7 @@ class TestCfgBuilder:
         assert len(cfg["nodes"]) >= 2
 
     def test_build_cfg_unknown_function_returns_none(self):
-        from kg_builder.collectors.code.cfg_builder import build_cfg
+        from kg_builder.collectors.code.python.cfg_builder import build_cfg
         src = "def foo(): pass\n"
         assert build_cfg(src, "nonexistent") is None
 
@@ -127,7 +127,7 @@ class TestCfgBuilder:
 )
 class TestCloneDetector:
     def test_fingerprint_stability(self):
-        from kg_builder.collectors.code.clone_detector import fingerprint
+        from kg_builder.collectors.code.python.clone_detector import fingerprint
         src = "def add(a, b):\n    return a + b\n"
         h1, n1 = fingerprint(src, "add")
         h2, n2 = fingerprint(src, "add")
@@ -137,7 +137,7 @@ class TestCloneDetector:
     def test_fingerprint_type2_normalisation(self):
         """Two structurally identical functions with different names/literals
         must produce the same fingerprint."""
-        from kg_builder.collectors.code.clone_detector import fingerprint
+        from kg_builder.collectors.code.python.clone_detector import fingerprint
         src_a = "def compute_a(items, tax):\n    total = 0\n    for item in items:\n        total = total + item * tax\n    return total\n"
         src_b = "def compute_b(rows, rate):\n    sumv = 0\n    for row in rows:\n        sumv = sumv + row * rate\n    return sumv\n"
         ha, na = fingerprint(src_a, "compute_a")
@@ -155,8 +155,8 @@ class TestCloneDetector:
 )
 class TestIrCompat:
     def test_build_artifact_populates_classes_and_functions(self):
-        from kg_builder.collectors.code.ir_compat import build_artifact
-        from kg_builder.collectors.code.scip_resolver import ScipIndex
+        from kg_builder.collectors.code.python.ir_compat import build_artifact
+        from kg_builder.collectors.code.python.scip_resolver import ScipIndex
         src = "class Foo:\n    def bar(self):\n        return 1\n\ndef baz():\n    return 2\n"
         art = build_artifact("test.py", src, "test", ScipIndex())
         assert len(art.classes) == 1
@@ -166,8 +166,8 @@ class TestIrCompat:
         assert "bar" in names and "baz" in names
 
     def test_build_artifact_calls_recorded(self):
-        from kg_builder.collectors.code.ir_compat import build_artifact
-        from kg_builder.collectors.code.scip_resolver import ScipIndex
+        from kg_builder.collectors.code.python.ir_compat import build_artifact
+        from kg_builder.collectors.code.python.scip_resolver import ScipIndex
         src = "def caller():\n    callee()\n\ndef callee():\n    pass\n"
         art = build_artifact("test.py", src, "test", ScipIndex())
         # Without SCIP, calls still get recorded with raw callee_name.
@@ -183,7 +183,7 @@ class TestIrCompat:
 class TestHardFailure:
     def test_collect_raises_when_toolkits_missing(self, monkeypatch, tmp_path):
         """CodeCollector.collect() must raise when required toolkit is unavailable."""
-        from kg_builder.collectors.code import status as st
+        from kg_builder.collectors.code.python import status as st
         from kg_builder.collectors.code.collector import CodeCollector
         from kg_builder.config import BuildSettings
 
@@ -218,8 +218,8 @@ class TestPythonBoundaryConditions:
     """Comprehensive edge-case coverage for the Python SCIP channel."""
 
     def _build(self, source: str, filename: str = "test.py", module: str = "test"):
-        from kg_builder.collectors.code.ir_compat import build_artifact
-        from kg_builder.collectors.code.scip_resolver import ScipIndex
+        from kg_builder.collectors.code.python.ir_compat import build_artifact
+        from kg_builder.collectors.code.python.scip_resolver import ScipIndex
         return build_artifact(filename, source, module, ScipIndex())
 
     # 1. Empty file / comment-only file
@@ -273,7 +273,7 @@ class TestPythonBoundaryConditions:
     # 6. Same-named functions across files (SCIP disambiguation)
     def test_same_name_functions_distinguished_by_scip(self):
         """Two files each define `process()`; SCIP resolves each to its own."""
-        from kg_builder.collectors.code.scip_resolver import (
+        from kg_builder.collectors.code.python.scip_resolver import (
             ScipIndex, DefinitionRecord, ReferenceRecord, resolve_call,
         )
         idx = ScipIndex()
@@ -301,7 +301,7 @@ class TestPythonBoundaryConditions:
     # 7. Relative import + same-name module (SCIP unaffected)
     def test_relative_import_scip_unaffected(self):
         """SCIP resolves by symbol, not by import alias text."""
-        from kg_builder.collectors.code.scip_resolver import (
+        from kg_builder.collectors.code.python.scip_resolver import (
             ScipIndex, ReferenceRecord, resolve_call,
         )
         idx = ScipIndex()
@@ -319,7 +319,7 @@ class TestPythonBoundaryConditions:
     # 8. from m import A as X (asname) -- SCIP can resolve despite IR gap
     def test_asname_resolved_by_scip(self):
         """SCIP doesn't rely on import alias text; it resolves by symbol position."""
-        from kg_builder.collectors.code.scip_resolver import (
+        from kg_builder.collectors.code.python.scip_resolver import (
             ScipIndex, ReferenceRecord, resolve_call,
         )
         idx = ScipIndex()
@@ -361,7 +361,7 @@ class TestPythonBoundaryConditions:
     # 11. SCIP index empty (no Python files) -- verify ScipIndex handles emptiness
     def test_empty_scip_index_graceful(self):
         """An empty ScipIndex produces no resolutions and no crashes."""
-        from kg_builder.collectors.code.scip_resolver import ScipIndex, resolve_call
+        from kg_builder.collectors.code.python.scip_resolver import ScipIndex, resolve_call
         idx = ScipIndex()
         assert resolve_call(idx, "any.py", 1, "anything") is None
         assert idx.find_enclosing_definition("any.py", 1) is None
@@ -370,7 +370,7 @@ class TestPythonBoundaryConditions:
     # 12. Multi-line call expression (callee on different line)
     def test_multiline_call_tolerance(self):
         """Callee token may be on a different line than the Call node."""
-        from kg_builder.collectors.code.scip_resolver import (
+        from kg_builder.collectors.code.python.scip_resolver import (
             ScipIndex, ReferenceRecord, resolve_call,
         )
         idx = ScipIndex()
