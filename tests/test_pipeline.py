@@ -8,9 +8,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from kg_builder.config import settings_for
-from kg_builder.collectors.deployment import DeploymentCollector
 from kg_builder.collectors.base import CollectorResult
 from kg_builder.enrichment.llm_client import LLMClient
+from kg_builder.graph.model import KGNode, Provenance
 from kg_builder.graph.ontology import NodeType, RelationType, SourceType
 from kg_builder.graph.serialization import load_graph
 from kg_builder.pipeline import BuildPipeline
@@ -91,33 +91,34 @@ def test_enrichment_requires_configured_llm(tmp_path):
 
 
 def test_cross_source_merge_code_and_deployment(tmp_path):
-    """Deployment Payment facts merge onto the code-derived PaymentService node."""
+    """Deployment facts merge into the graph alongside code-derived nodes."""
     import shutil
     if not shutil.which("scip-python"):
         import pytest
         pytest.skip("scip-python not available")
-    from dataclasses import dataclass
     from kg_builder.collectors import build_collectors
+    from kg_builder.graph.model import make_node_id
 
     settings = settings_for(SAMPLE, tmp_path / "kg.json", enrich=False)
     pipeline = BuildPipeline(settings)
     collectors = build_collectors(settings)
 
-    # Simulate deployment records via the generic bridge.
-    @dataclass
-    class MockK8sDeployment:
-        namespace: str = "prod"
-        name: str = "payment"
-        replicas: int = 1
-        ready_replicas: int = 1
-
-    dep = DeploymentCollector(settings)
-    nodes, edges = dep._records_to_graph([MockK8sDeployment()], "ack")
+    # Simulate a deployment node (as if collected from K8s).
     dep_res = CollectorResult(collector="deployment")
-    for n in nodes:
-        dep_res.add_node(n)
-    for e in edges:
-        dep_res.add_edge(e)
+    prov = Provenance(
+        source_type=SourceType.DEPLOYMENT,
+        source_id="test-cluster/prod/deployment/payment",
+        evidence="payment deployment",
+        confidence=1.0,
+        detail={"collector": "deployment", "cluster": "test-cluster"},
+    )
+    dep_id = make_node_id(NodeType.DEPLOYMENT.value, "prod/payment", "")
+    dep_res.add_node(KGNode(
+        id=dep_id, type=NodeType.DEPLOYMENT.value, name="payment",
+        canonical_name="prod/payment", namespace="",
+        attributes={"cluster": "test-cluster", "namespace": "prod", "replicas": 1},
+        provenance=[prov],
+    ))
 
     class _FixtureCollector:
         name = "deployment-fixture"

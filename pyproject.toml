@@ -32,25 +32,8 @@ semgrep = ["semgrep>=1.60"]
 # Open-source code analysis stack (scip-python + radon + tree-sitter).
 # Replaces the legacy CodeCollector when code_analysis.enabled=true in config.
 code_analysis = ["scip>=0.4", "radon>=6.0", "tree-sitter>=0.21,<0.24", "tree-sitter-python>=0.21", "tree-sitter-java>=0.21"]
-# Deployment collector (Kubernetes). Stub now; wire the real client later.
+# Deployment collector (Kubernetes).
 k8s = ["kubernetes>=28.0"]
-# Alibaba Cloud SDK dependencies for deployment collector cloud product collectors.
-alicloud = [
-    "alibabacloud-credentials>=0.3",
-    "alibabacloud-ecs20140526>=3.0",
-    "alibabacloud-rds20140815>=3.0",
-    "alibabacloud-oss20190517>=1.0",
-    "alibabacloud-sls20201230>=3.0",
-    "alibabacloud-cms20190101>=8.0",
-    "alibabacloud-ros20190910>=3.0",
-    "alibabacloud-cr20181201>=2.0",
-    "alibabacloud-alb20200616>=1.0",
-    "alibabacloud-arms20190808>=2.0",
-    "alibabacloud-fc-open20210406>=2.0",
-    "alibabacloud-eventbridge20200401>=2.0",
-    "alibabacloud-devops20210625>=2.0",
-    "kubernetes>=28.0",
-]
 # Import the built graph into a live Neo4j (`kgb export-neo4j`).
 neo4j = ["neo4j>=5.0"]
 dev = ["pytest>=7.0"]

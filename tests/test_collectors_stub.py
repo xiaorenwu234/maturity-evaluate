@@ -1,9 +1,9 @@
-"""Tests for the (stub) deployment + runtime collectors' mapping logic.
+"""Tests for the deployment + runtime collectors.
 
-The cloud/cluster *fetching* is intentionally unimplemented, but the mapping from
-a normalised observation record to graph primitives (with ``source=deployment`` /
-``source=runtime`` provenance) is tested here so the evidence-chain behaviour is
-already correct for when the real clients are wired in.
+Deployment collector connects to a real K8s cluster, so these tests verify:
+1. Disabled collector returns empty result
+2. Enabled but no kubeconfig produces a warning
+3. Provenance is correctly tagged with source=deployment
 """
 from __future__ import annotations
 
@@ -17,38 +17,34 @@ from kg_builder.graph.ontology import NodeType, RelationType, SourceType
 SAMPLE = Path(__file__).resolve().parents[1] / "examples" / "sample_repo"
 
 
-def test_deployment_stub_collect_is_empty_and_warns():
+def test_deployment_disabled_returns_empty():
+    """When deployment.enabled is False, collect() returns empty result."""
     settings = settings_for(SAMPLE)  # deployment disabled by default
-    settings.deployment.enabled = True  # force-enable to exercise collect()
     collector = DeploymentCollector(settings)
     result = collector.collect()
-    # No cloud products configured -> empty nodes, warning about no products.
     assert result.nodes == []
-    assert any("no cloud products" in w for w in result.warnings)
+    assert result.edges == []
 
 
-def test_deployment_records_to_graph_produces_nodes_and_provenance():
-    """Test the generic record-to-graph bridge with a mock record."""
-    from dataclasses import dataclass
-    from kg_builder.graph.ontology import SourceType
+def test_deployment_enabled_no_kubeconfig_warns():
+    """When enabled but k8s SDK or kubeconfig is unavailable, warns."""
+    settings = settings_for(SAMPLE)
+    settings.deployment.enabled = True
+    collector = DeploymentCollector(settings)
+    result = collector.collect()
+    # Should have at least one warning (either k8s not installed or kubeconfig load failed)
+    assert len(result.warnings) >= 1
 
-    @dataclass
-    class EcsInstanceRecord:
-        instance_id: str = "i-test123"
-        instance_name: str = "test-server"
-        status: str = "Running"
 
+def test_deployment_provenance_structure():
+    """Verify _prov helper produces correct provenance."""
     settings = settings_for(SAMPLE)
     collector = DeploymentCollector(settings)
-    nodes, edges = collector._records_to_graph([EcsInstanceRecord()], "ecs")
-
-    assert len(nodes) == 1
-    assert nodes[0].type == "Infrastructure"
-    assert nodes[0].name == "test-server"
-    assert nodes[0].attributes["cloud_provider"] == "alibaba"
-    prov = nodes[0].provenance[0]
+    prov = collector._prov("test-cluster/default/deployment/nginx", "nginx deployment")
     assert prov.source_type == SourceType.DEPLOYMENT.value
     assert prov.confidence == 1.0
+    assert prov.source_id == "test-cluster/default/deployment/nginx"
+    assert prov.detail["cluster"] == "default"
 
 
 def test_runtime_mapping_produces_observed_by():

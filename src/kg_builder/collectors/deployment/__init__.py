@@ -1,4 +1,4 @@
-"""Deployment collector package (Kubernetes / Alibaba Cloud)."""
+"""Deployment collector package (Kubernetes)."""
 from __future__ import annotations
 
 from .collector import DeploymentCollector

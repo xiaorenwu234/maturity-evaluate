@@ -50,76 +50,14 @@ code_analysis:
 document:
   enabled: true
 
-# --- Deployment collector (Kubernetes + Alibaba Cloud) ---
-# Requires: pip install -e ".[alicloud]" for Alibaba Cloud SDK dependencies.
-# Credentials: set ALIBABA_CLOUD_ACCESS_KEY_ID / ALIBABA_CLOUD_ACCESS_KEY_SECRET env vars.
+# --- Deployment collector (Kubernetes) ---
+# Requires: pip install -e ".[k8s]" for the kubernetes Python client.
 deployment:
   enabled: false
-  aliyun_region: cn-hongkong
-  # AK/SK prefer env vars; can also be set inline (not recommended for production)
-  # aliyun_access_key_id: ""
-  # aliyun_access_key_secret: ""
-
-  # K8s / ACK
-  cluster_id: null           # ACK cluster ID (triggers ACK collector)
-  kubeconfig: null           # single kubeconfig path
-  kubeconfig_paths: []       # multiple kubeconfig paths
-  context: null              # kubeconfig context name
+  kubeconfig: null           # path to kubeconfig file (null = in-cluster config)
+  context: null              # kubeconfig context name (null = current-context)
   namespaces: []             # empty = all namespaces
   cluster_name: default
-
-  # Alibaba Cloud products (set enabled: true for each you want to collect)
-  ecs:
-    enabled: false
-  rds:
-    enabled: false
-    instance_ids: []         # optional: specific RDS instance IDs
-  oss:
-    enabled: false
-    bucket_names: []         # optional: specific OSS bucket names
-  sls:
-    enabled: false
-    project: ""              # SLS project name
-    logstores: []            # optional: specific logstore names
-  cms:
-    enabled: false
-  ros:
-    enabled: false
-    stack_names: []          # optional: specific ROS stack names
-  acr:
-    enabled: false
-    instance_ids: []
-    otel_only: true
-  alb:
-    enabled: false
-    load_balancer_ids: []
-  arms:
-    enabled: false
-  fc:
-    enabled: false
-    function_names: []       # optional: specific FC function names
-  eventbridge:
-    enabled: false
-    bus_names: []
-  grafana:
-    enabled: false
-    url: ""                  # Grafana URL
-    workspace_id: ""         # Alibaba Managed Grafana workspace ID
-    api_token_env: GRAFANA_API_TOKEN  # env var holding the API token
-    folder_ids: []
-    tags: []
-  gtm:
-    enabled: false
-  tair:
-    enabled: false
-    instance_ids: []
-  codeup:
-    enabled: false
-    org_id: ""
-    project_name: ""
-    yunxiao_token_env: YUNXIAO_TOKEN  # env var holding Yunxiao token
-    repo_ids: []
-    pipeline_ids: []
 
 # --- Runtime metrics / logs / traces collector — currently a STUB ---
 runtime:
