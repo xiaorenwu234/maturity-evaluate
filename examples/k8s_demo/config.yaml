@@ -1,0 +1,24 @@
+# kgb build config for k8s_demo project
+namespace: kgb-demo
+
+enrich: true
+
+llm:
+  provider: openai
+  model: deepseek-flash
+  base_url: https://api.deepseek.com/v1
+  api_key: sk-67d857788f7d44bba4213bd9c72483d6
+  temperature: 0
+  request_timeout: 60
+  json_mode: true
+  max_items_per_call: 40
+
+code_analysis:
+  enabled: false
+
+deployment:
+  enabled: true
+  kubeconfig: /home/xueht/maturity-evaluate-4.1/config
+  cluster_name: k8s-demo
+  namespaces:
+    - kgb-demo

@@ -309,12 +309,12 @@ class K8sCollector:
 
     def _collect_nodes(self, nodes: list, edges: list, v1, cluster: str):
         try:
-            nodes = v1.list_node()
+            node_list = v1.list_node()
         except Exception as exc:
             logger.warning(f"Failed to list nodes: {exc}")
             return
 
-        for node in nodes.items:
+        for node in node_list.items:
             meta = node.metadata
             status = node.status
             prov = self._prov(f"{cluster}/node/{meta.name}", str(meta.name))

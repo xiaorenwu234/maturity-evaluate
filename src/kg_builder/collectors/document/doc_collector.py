@@ -16,6 +16,7 @@ cross-source discrepancy Module 2 later reasons about.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Optional
@@ -33,6 +34,8 @@ _TEXT_EXTS = {".md", ".markdown", ".rst", ".txt"}
 # Names that are too generic to be treated as a real service/config.
 _STOP_CONFIG_KEYS = {"version", "name", "enabled", "type", "kind", "metadata", "spec"}
 
+logger = logging.getLogger(__name__)
+
 
 class DocumentCollector(BaseCollector):
     name = "document"
@@ -49,6 +52,8 @@ class DocumentCollector(BaseCollector):
     def collect(self) -> CollectorResult:
         result = CollectorResult(collector=self.name)
         scanned = 0
+        text_docs: list[tuple[str, str]] = []  # (rel_path, content) for LLM analysis
+
         for path in sorted(self.root.rglob("*")):
             if not path.is_file():
                 continue
@@ -70,7 +75,13 @@ class DocumentCollector(BaseCollector):
                 self._handle_config(result, path, rel, ext, text)
             else:
                 self._handle_text(result, path, rel, text)
+                text_docs.append((rel, text))
             scanned += 1
+
+        # LLM-based document analysis for cross-source mapping
+        if text_docs and self.settings.enrich:
+            self._llm_analyze_docs(result, text_docs)
+
         result.metrics["documents_scanned"] = scanned
         return result
 
@@ -162,7 +173,12 @@ class DocumentCollector(BaseCollector):
             elif ext in (".yaml", ".yml"):
                 import yaml  # type: ignore
 
-                data = yaml.safe_load(text)
+                docs = list(yaml.safe_load_all(text))
+                # Merge multiple YAML documents into one dict
+                data = {}
+                for doc in docs:
+                    if isinstance(doc, dict):
+                        data.update(doc)
             elif ext == ".toml":
                 try:
                     import tomllib  # py3.11+
@@ -223,6 +239,119 @@ class DocumentCollector(BaseCollector):
             return str(path.relative_to(self.root))
         except ValueError:
             return str(path)
+
+    # --------------------------------------------------------- LLM analysis
+    def _llm_analyze_docs(
+        self, result: CollectorResult, text_docs: list[tuple[str, str]]
+    ) -> None:
+        """Use LLM to extract service-deployment-source mappings from docs.
+
+        Produces DEPLOYED_AS edges linking Service nodes to Deployment nodes,
+        enabling cross-source correlation between code and K8s data.
+        """
+        try:
+            from ...enrichment.llm_client import create_llm_client
+        except Exception as exc:
+            result.warnings.append(f"LLM client import failed: {exc}")
+            return
+
+        try:
+            llm = create_llm_client(self.settings.llm)
+        except Exception as exc:
+            result.warnings.append(f"LLM client creation failed: {exc}")
+            return
+
+        # Concatenate all text docs into a single prompt
+        docs_content = "\n\n---\n\n".join(
+            f"## File: {rel}\n\n{content}" for rel, content in text_docs
+        )
+
+        system_prompt = (
+            "你是资深软件架构分析师。分析以下项目文档，提取服务与部署的映射关系。\n"
+            "严格按 JSON 格式输出，不要添加解释文字。\n"
+            '输出格式：{"services": [{"service_name": "...", "k8s_deployment": "...", '
+            '"k8s_namespace": "...", "source_files": ["..."], "responsibility": "..."}]}'
+        )
+
+        user_prompt = f"分析以下项目文档，提取所有服务的名称、对应的 K8s Deployment 名称、namespace、源码文件路径和职责描述。\n\n{docs_content}"
+
+        try:
+            response = llm.complete_json(system_prompt, user_prompt)
+        except Exception as exc:
+            result.warnings.append(f"LLM document analysis failed: {exc}")
+            return
+
+        services = response.get("services", []) if isinstance(response, dict) else []
+        if not services:
+            result.warnings.append("LLM returned no service mappings from documents")
+            return
+
+        logger.info(f"LLM extracted {len(services)} service mappings from documents")
+        result.metrics["llm_service_mappings"] = len(services)
+
+        for svc_info in services:
+            svc_name = svc_info.get("service_name", "")
+            k8s_deploy = svc_info.get("k8s_deployment", "")
+            k8s_ns = svc_info.get("k8s_namespace", "")
+            source_files = svc_info.get("source_files", [])
+            responsibility = svc_info.get("responsibility", "")
+
+            if not svc_name or not k8s_deploy:
+                continue
+
+            # Create/update Service node with LLM-derived attributes
+            svc_id = make_node_id(NodeType.SERVICE.value, svc_name, self.namespace)
+            prov = Provenance(
+                source_type=SourceType.DOCUMENT,
+                source_id="llm_doc_analysis",
+                evidence=f"LLM: {svc_name} -> {k8s_deploy}",
+                confidence=0.7,
+                detail={"collector": self.name, "method": "llm"},
+            )
+            svc_node = KGNode(
+                id=svc_id, type=NodeType.SERVICE.value, name=svc_name,
+                canonical_name=svc_name, namespace=self.namespace,
+                attributes={
+                    "responsibility": responsibility,
+                    "source_files": source_files,
+                    "k8s_deployment": k8s_deploy,
+                    "k8s_namespace": k8s_ns,
+                },
+                provenance=[prov],
+            )
+            result.add_node(svc_node)
+
+            # Create DEPLOYED_AS edge: Service -> Deployment
+            deploy_canon = f"{k8s_ns}/{k8s_deploy}" if k8s_ns else k8s_deploy
+            deploy_id = make_node_id(NodeType.DEPLOYMENT.value, deploy_canon, self.namespace)
+            deploy_prov = Provenance(
+                source_type=SourceType.DOCUMENT,
+                source_id="llm_doc_analysis",
+                evidence=f"LLM: {svc_name} deployed as {k8s_deploy} in {k8s_ns}",
+                confidence=0.7,
+                detail={"collector": self.name, "method": "llm"},
+            )
+            result.add_edge(KGEdge(
+                svc_id, deploy_id, RelationType.DEPLOYED_AS.value,
+                {"k8s_namespace": k8s_ns, "source": "document_llm"},
+                [deploy_prov],
+            ))
+
+            # Link source files to the service
+            for src_file in source_files:
+                file_id = make_node_id(NodeType.MODULE.value, src_file, self.namespace)
+                file_prov = Provenance(
+                    source_type=SourceType.DOCUMENT,
+                    source_id="llm_doc_analysis",
+                    evidence=f"LLM: {src_file} implements {svc_name}",
+                    confidence=0.7,
+                    detail={"collector": self.name, "method": "llm"},
+                )
+                result.add_edge(KGEdge(
+                    svc_id, file_id, RelationType.IMPLEMENTS.value,
+                    {"source": "document_llm"},
+                    [file_prov],
+                ))
 
 
 def _short(value: Any, limit: int = 120) -> str:

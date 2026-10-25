@@ -59,6 +59,7 @@ class RelationType(str, Enum):
     INHERITS = "INHERITS"        # service/class -> service/class (type hierarchy)
     TEMPORALLY_COUPLED = "TEMPORALLY_COUPLED"  # module -> module (co-changed in VCS)
     CLONE_OF = "CLONE_OF"        # function -> function (type-2 duplicate body)
+    IMPLEMENTS = "IMPLEMENTS"    # service -> module/file (LLM/doc-derived mapping)
 
     @classmethod
     def is_valid(cls, value: str) -> bool:
