@@ -37,10 +37,11 @@ def test_deployment_enabled_no_kubeconfig_warns():
 
 
 def test_deployment_provenance_structure():
-    """Verify _prov helper produces correct provenance."""
+    """Verify K8s sub-collector _prov helper produces correct provenance."""
+    from kg_builder.collectors.deployment.k8s import K8sCollector
     settings = settings_for(SAMPLE)
-    collector = DeploymentCollector(settings)
-    prov = collector._prov("test-cluster/default/deployment/nginx", "nginx deployment")
+    k8s = K8sCollector(settings.deployment, settings.namespace)
+    prov = k8s._prov("test-cluster/default/deployment/nginx", "nginx deployment")
     assert prov.source_type == SourceType.DEPLOYMENT.value
     assert prov.confidence == 1.0
     assert prov.source_id == "test-cluster/default/deployment/nginx"
