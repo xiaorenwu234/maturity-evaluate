@@ -98,35 +98,140 @@ class DocumentCollector(BaseCollector):
         )
         result.add_node(doc_node)
 
+        # Use LLM to extract structured info from prose documents
+        if self.settings.enrich:
+            llm_info = self._llm_analyze_text(rel, text)
+            if llm_info:
+                self._apply_llm_text_result(result, doc_node, rel, llm_info)
+            else:
+                # LLM failed: fall back to heuristic extraction
+                self._heuristic_text_extract(result, doc_node, rel, text)
+        else:
+            # enrich disabled: use heuristic only
+            self._heuristic_text_extract(result, doc_node, rel, text)
+
+    def _heuristic_text_extract(self, result: CollectorResult, doc_node: KGNode,
+                                rel: str, text: str) -> None:
+        """Fallback heuristic extraction when LLM is unavailable."""
         for svc in set(_SERVICE_TOKEN_RE.findall(text)):
             svc_node = KGNode(
                 id=make_node_id(NodeType.SERVICE.value, svc, self.namespace),
-                type=NodeType.SERVICE.value,
-                name=svc,
-                canonical_name=svc,
-                namespace=self.namespace,
-                attributes={"mentioned_in": rel},
+                type=NodeType.SERVICE.value, name=svc, canonical_name=svc,
+                namespace=self.namespace, attributes={"mentioned_in": rel},
                 provenance=[self._prov(rel, self._line_of(text, svc), f"mentions {svc}")],
             )
             result.add_node(svc_node)
             result.add_edge(KGEdge(doc_node.id, svc_node.id, RelationType.DEPENDS_ON.value,
                                    {"kind": "documents"}, [self._prov(rel, 1, f"{rel} documents {svc}")]))
 
-        # API paths referenced in interface docs.
         for apipath in set(_API_PATH_RE.findall(text)):
             if apipath.count("/") < 1 or apipath in {"/", "//"}:
                 continue
             label = f"ANY {apipath}"
             api_node = KGNode(
                 id=make_node_id(NodeType.API.value, label.lower(), self.namespace),
-                type=NodeType.API.value,
-                name=label,
-                canonical_name=label.lower(),
-                namespace=self.namespace,
-                attributes={"path": apipath, "from_doc": rel},
+                type=NodeType.API.value, name=label, canonical_name=label.lower(),
+                namespace=self.namespace, attributes={"path": apipath, "from_doc": rel},
                 provenance=[self._prov(rel, self._line_of(text, apipath), f"documents API {apipath}")],
             )
             result.add_node(api_node)
+
+    def _llm_analyze_text(self, rel: str, text: str) -> Optional[dict]:
+        """Use LLM to extract services, APIs, and relationships from a text document."""
+        try:
+            from ...enrichment.llm_client import create_llm_client
+            llm = create_llm_client(self.settings.llm)
+        except Exception:
+            return None
+
+        truncated = text[:6000] if len(text) > 6000 else text
+
+        system_prompt = (
+            "你是资深软件架构分析师。分析以下技术文档，提取其中提到的服务、API接口和调用关系。\n"
+            "严格按 JSON 格式输出，不要添加解释文字。\n"
+            '输出格式：{\n'
+            '  "services": [{"name": "ServiceName", "responsibility": "职责描述"}],\n'
+            '  "apis": [{"path": "/api/v1/orders", "method": "GET", "description": "描述"}],\n'
+            '  "relationships": [{"from": "OrderService", "to": "InventoryService", "type": "CALLS", "description": "调用原因"}],\n'
+            '  "summary": "文档内容摘要"\n'
+            '}'
+        )
+
+        user_prompt = f"文档路径: {rel}\n\n内容:\n{truncated}"
+
+        try:
+            response = llm.complete_json(system_prompt, user_prompt)
+            if isinstance(response, dict):
+                return response
+        except Exception as exc:
+            logger.warning(f"LLM text analysis failed for {rel}: {exc}")
+        return None
+
+    def _apply_llm_text_result(self, result: CollectorResult, doc_node: KGNode,
+                               rel: str, llm_info: dict) -> None:
+        """Apply LLM-extracted structured info to the graph."""
+        prov = Provenance(
+            source_type=SourceType.DOCUMENT,
+            source_id=f"llm_text:{rel}",
+            evidence=f"LLM text analysis of {rel}",
+            confidence=0.7,
+            detail={"collector": self.name, "method": "llm"},
+        )
+
+        # Services mentioned in the document
+        for svc_info in llm_info.get("services", []):
+            svc_name = svc_info.get("name", "")
+            if not svc_name:
+                continue
+            svc_id = make_node_id(NodeType.SERVICE.value, svc_name, self.namespace)
+            result.add_node(KGNode(
+                id=svc_id, type=NodeType.SERVICE.value, name=svc_name,
+                canonical_name=svc_name, namespace=self.namespace,
+                attributes={"mentioned_in": rel, "responsibility": svc_info.get("responsibility", "")},
+                provenance=[prov],
+            ))
+            result.add_edge(KGEdge(doc_node.id, svc_id, RelationType.DEPENDS_ON.value,
+                                   {"kind": "documents"}, [prov]))
+
+        # API endpoints
+        for api_info in llm_info.get("apis", []):
+            path = api_info.get("path", "")
+            method = api_info.get("method", "ANY")
+            if not path:
+                continue
+            label = f"{method} {path}"
+            api_id = make_node_id(NodeType.API.value, label.lower(), self.namespace)
+            result.add_node(KGNode(
+                id=api_id, type=NodeType.API.value, name=label,
+                canonical_name=label.lower(), namespace=self.namespace,
+                attributes={"path": path, "method": method, "from_doc": rel,
+                            "description": api_info.get("description", "")},
+                provenance=[prov],
+            ))
+
+        # Relationships between services
+        for rel_info in llm_info.get("relationships", []):
+            from_svc = rel_info.get("from", "")
+            to_svc = rel_info.get("to", "")
+            rel_type = rel_info.get("type", "CALLS")
+            if not from_svc or not to_svc:
+                continue
+            from_id = make_node_id(NodeType.SERVICE.value, from_svc, self.namespace)
+            to_id = make_node_id(NodeType.SERVICE.value, to_svc, self.namespace)
+            # Map relationship type to ontology
+            mapped_rel = RelationType.CALLS.value
+            if rel_type.upper() == "DEPENDS_ON":
+                mapped_rel = RelationType.DEPENDS_ON.value
+            elif rel_type.upper() == "DEPLOYED_AS":
+                mapped_rel = RelationType.DEPLOYED_AS.value
+            result.add_edge(KGEdge(from_id, to_id, mapped_rel,
+                                   {"source": "document_llm", "description": rel_info.get("description", "")},
+                                   [prov]))
+
+        # Attach summary to document node
+        summary = llm_info.get("summary", "")
+        if summary:
+            doc_node.attributes["llm_summary"] = summary
 
     # ----------------------------------------------------------- config docs
     def _handle_config(self, result: CollectorResult, path: Path, rel: str, ext: str, text: str) -> None:
