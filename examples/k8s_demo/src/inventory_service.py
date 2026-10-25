@@ -26,3 +26,4 @@ class InventoryService:
     def update_stock(self, product_id: str, quantity: int) -> None:
         """Add incoming stock for a product."""
         self._stock[product_id] = self._stock.get(product_id, 0) + quantity
+# v2: optimized stock check

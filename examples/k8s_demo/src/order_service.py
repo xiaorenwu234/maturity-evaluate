@@ -28,3 +28,6 @@ class OrderService:
         self.inventory_service.release(order_id)
         self.payment_service.refund(order_id)
         return True
+# v2: added error handling
+# v2: order-inventory integration
+# v3: order-payment integration

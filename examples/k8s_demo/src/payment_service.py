@@ -14,3 +14,4 @@ class PaymentService:
     def refund(self, order_id: str) -> bool:
         """Refund a completed order."""
         return True
+# v3: payment retry logic

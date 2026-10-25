@@ -28,3 +28,4 @@
 - order-service: 2 replicas, CPU 200m, Memory 256Mi
 - inventory-service: 1 replica, CPU 100m, Memory 128Mi
 - payment-service: 2 replicas, CPU 200m, Memory 256Mi
+# v4: update architecture

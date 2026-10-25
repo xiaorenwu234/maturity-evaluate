@@ -16,6 +16,10 @@ llm:
 code_analysis:
   enabled: false
 
+history:
+  enabled: true
+  min_cochange: 2
+
 deployment:
   enabled: true
   kubeconfig: /home/xueht/maturity-evaluate-4.1/config
