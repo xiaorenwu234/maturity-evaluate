@@ -141,29 +141,82 @@ class DocumentCollector(BaseCollector):
         )
         result.add_node(doc_node)
 
-        owner_service = self._service_hint(rel, text)
+        # --- Layer 1: LLM analysis for service ownership & semantic summary ---
+        llm_info = self._llm_analyze_config(rel, ext, text) if self.settings.enrich else None
+
+        # Determine owner service: LLM result > heuristic fallback
+        owner_service = None
+        if llm_info and llm_info.get("owner_service"):
+            owner_service = llm_info["owner_service"]
+        else:
+            owner_service = self._service_hint(rel, text)
+
+        # --- Layer 2: Rule-based parsing for structured formats ---
         flat = self._flatten_config(ext, text, result, rel)
-        for key, value in list(flat.items())[:500]:
-            cfg_node = KGNode(
-                id=make_node_id(NodeType.CONFIG.value, key.lower(), self.namespace),
-                type=NodeType.CONFIG.value,
-                name=key,
-                canonical_name=key.lower(),
-                namespace=self.namespace,
-                attributes={"value": _short(value), "source_file": rel},
-                provenance=[self._prov(rel, self._line_of(text, key.split('.')[-1]), f"{key}={_short(value)}")],
-            )
-            result.add_node(cfg_node)
-            if owner_service:
-                svc = KGNode(
-                    id=make_node_id(NodeType.SERVICE.value, owner_service, self.namespace),
-                    type=NodeType.SERVICE.value, name=owner_service, canonical_name=owner_service,
-                    namespace=self.namespace, attributes={"configured_by_file": rel},
-                    provenance=[self._prov(rel, 1, f"{owner_service} configured by {rel}")],
+
+        if flat:
+            # Structured parse succeeded: create Config nodes from flattened keys
+            for key, value in list(flat.items())[:500]:
+                cfg_node = KGNode(
+                    id=make_node_id(NodeType.CONFIG.value, key.lower(), self.namespace),
+                    type=NodeType.CONFIG.value,
+                    name=key,
+                    canonical_name=key.lower(),
+                    namespace=self.namespace,
+                    attributes={"value": _short(value), "source_file": rel},
+                    provenance=[self._prov(rel, self._line_of(text, key.split('.')[-1]), f"{key}={_short(value)}")],
                 )
-                result.add_node(svc)
-                result.add_edge(KGEdge(svc.id, cfg_node.id, RelationType.CONFIGURED_BY.value,
-                                       {"declared_in": rel}, [self._prov(rel, 1, f"{owner_service}.{key}")]))
+                result.add_node(cfg_node)
+                if owner_service:
+                    svc = KGNode(
+                        id=make_node_id(NodeType.SERVICE.value, owner_service, self.namespace),
+                        type=NodeType.SERVICE.value, name=owner_service, canonical_name=owner_service,
+                        namespace=self.namespace, attributes={"configured_by_file": rel},
+                        provenance=[self._prov(rel, 1, f"{owner_service} configured by {rel}")],
+                    )
+                    result.add_node(svc)
+                    result.add_edge(KGEdge(svc.id, cfg_node.id, RelationType.CONFIGURED_BY.value,
+                                           {"declared_in": rel}, [self._prov(rel, 1, f"{owner_service}.{key}")]))
+        elif llm_info and llm_info.get("config_items"):
+            # --- Layer 3: LLM-extracted config items when rule parsing fails ---
+            logger.info(f"LLM extracted {len(llm_info['config_items'])} config items from {rel}")
+            for item in llm_info["config_items"]:
+                key = item.get("key", "")
+                value = item.get("value", "")
+                description = item.get("description", "")
+                if not key:
+                    continue
+                cfg_prov = Provenance(
+                    source_type=SourceType.DOCUMENT,
+                    source_id=f"llm_config:{rel}",
+                    evidence=f"LLM: {key}={_short(value)} ({description})",
+                    confidence=0.7,
+                    detail={"collector": self.name, "method": "llm"},
+                )
+                cfg_node = KGNode(
+                    id=make_node_id(NodeType.CONFIG.value, key.lower(), self.namespace),
+                    type=NodeType.CONFIG.value,
+                    name=key,
+                    canonical_name=key.lower(),
+                    namespace=self.namespace,
+                    attributes={"value": _short(value), "source_file": rel, "description": description},
+                    provenance=[cfg_prov],
+                )
+                result.add_node(cfg_node)
+                if owner_service:
+                    svc = KGNode(
+                        id=make_node_id(NodeType.SERVICE.value, owner_service, self.namespace),
+                        type=NodeType.SERVICE.value, name=owner_service, canonical_name=owner_service,
+                        namespace=self.namespace, attributes={"configured_by_file": rel},
+                        provenance=[cfg_prov],
+                    )
+                    result.add_node(svc)
+                    result.add_edge(KGEdge(svc.id, cfg_node.id, RelationType.CONFIGURED_BY.value,
+                                           {"declared_in": rel, "source": "llm"}, [cfg_prov]))
+
+        # Attach LLM semantic summary to the document node if available
+        if llm_info and llm_info.get("summary"):
+            doc_node.attributes["llm_summary"] = llm_info["summary"]
 
     def _flatten_config(self, ext: str, text: str, result: CollectorResult, rel: str) -> dict[str, Any]:
         data: Any = None
@@ -241,6 +294,45 @@ class DocumentCollector(BaseCollector):
             return str(path)
 
     # --------------------------------------------------------- LLM analysis
+    def _llm_analyze_config(self, rel: str, ext: str, text: str) -> Optional[dict]:
+        """Use LLM to analyze a single config file.
+
+        Returns a dict with:
+        - owner_service: str (which service this config belongs to)
+        - summary: str (semantic summary of what this config controls)
+        - config_items: list[{key, value, description}] (for unparseable files)
+
+        Returns None if LLM is unavailable or analysis fails.
+        """
+        try:
+            from ...enrichment.llm_client import create_llm_client
+            llm = create_llm_client(self.settings.llm)
+        except Exception:
+            return None
+
+        # Truncate very large configs to avoid token limits
+        truncated = text[:8000] if len(text) > 8000 else text
+
+        system_prompt = (
+            "你是资深软件架构分析师。分析以下配置文件，判断它属于哪个服务、控制什么行为。\n"
+            "严格按 JSON 格式输出，不要添加解释文字。\n"
+            '输出格式：{"owner_service": "ServiceName或null", '
+            '"summary": "配置语义摘要", '
+            '"config_items": [{"key": "...", "value": "...", "description": "..."}]}\n'
+            "如果文件是标准结构化格式(YAML/JSON/TOML)，config_items可以为空数组（将由规则解析处理）。\n"
+            "如果文件无法被规则解析，请提取关键配置项填入config_items。"
+        )
+
+        user_prompt = f"文件名: {rel}\n格式: {ext}\n\n内容:\n{truncated}"
+
+        try:
+            response = llm.complete_json(system_prompt, user_prompt)
+            if isinstance(response, dict):
+                return response
+        except Exception as exc:
+            logger.warning(f"LLM config analysis failed for {rel}: {exc}")
+        return None
+
     def _llm_analyze_docs(
         self, result: CollectorResult, text_docs: list[tuple[str, str]]
     ) -> None:
