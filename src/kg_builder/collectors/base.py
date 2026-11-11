@@ -16,6 +16,47 @@ from dataclasses import dataclass, field
 
 from ..graph.model import KGEdge, KGNode
 
+# Java source roots stripped before deriving a module name.
+_JAVA_SOURCE_ROOTS = ("src/main/java/", "src/test/java/", "src/")
+
+
+def python_module_name(rel_path: str) -> str:
+    """Derive the dotted module name a Python file contributes to the graph.
+
+    ``services/order_service.py`` -> ``services.order_service`` and
+    ``pkg/__init__.py`` -> ``pkg``. This is the canonical key the code collector
+    stores on ``Module`` nodes, so history/document facts can merge onto the same
+    node instead of creating variants.
+    """
+    stem = rel_path.rsplit(".", 1)[0]
+    parts = [p for p in stem.replace("\\", "/").split("/") if p not in {"", "."}]
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    return ".".join(parts) or rel_path
+
+
+def java_module_name(rel_path: str) -> str:
+    """Derive the module name a Java file contributes to the graph.
+
+    ``src/main/java/com/example/OrderService.java`` -> ``com.example.OrderService``.
+    Keeping the file name in the key makes ``FileArtifact.module`` identify one
+    file (the class qname is ``com.example.OrderService``); the code collector
+    uses this same function so both sides agree.
+    """
+    p = rel_path.replace("\\", "/")
+    for prefix in _JAVA_SOURCE_ROOTS:
+        if p.startswith(prefix):
+            p = p[len(prefix):]
+            break
+    return p.removesuffix(".java").replace("/", ".")
+
+
+def module_name_of(rel_path: str) -> str:
+    """Module key for any source path (dispatches on the file extension)."""
+    if rel_path.replace("\\", "/").lower().endswith(".java"):
+        return java_module_name(rel_path)
+    return python_module_name(rel_path)
+
 
 @dataclass
 class CollectorResult:

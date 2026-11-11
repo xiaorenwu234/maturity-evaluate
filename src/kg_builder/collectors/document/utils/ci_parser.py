@@ -77,9 +77,9 @@ class CIParser(BaseConfigParser):
         if ".github/workflows/" in rp:
             jobs = data.get("jobs", {})
             wf_name = data.get("name", rel_path)
-            node_id = make_node_id("Pipeline", wf_name, namespace)
+            node_id = make_node_id(NodeType.PIPELINE.value, wf_name, namespace)
             result.nodes.append(KGNode(
-                id=node_id, type="Pipeline", name=wf_name,
+                id=node_id, type=NodeType.PIPELINE.value, name=wf_name,
                 canonical_name=wf_name, namespace=namespace,
                 attributes={"kind": "github_actions", "job_count": len(jobs), "source_file": rel_path},
                 provenance=[prov],
@@ -89,9 +89,9 @@ class CIParser(BaseConfigParser):
         elif ".gitlab-ci" in rp:
             stages = data.get("stages", [])
             jobs = {k: v for k, v in data.items() if isinstance(v, dict) and "stage" in v}
-            node_id = make_node_id("Pipeline", "gitlab-ci", namespace)
+            node_id = make_node_id(NodeType.PIPELINE.value, "gitlab-ci", namespace)
             result.nodes.append(KGNode(
-                id=node_id, type="Pipeline", name="gitlab-ci",
+                id=node_id, type=NodeType.PIPELINE.value, name="gitlab-ci",
                 canonical_name="gitlab-ci", namespace=namespace,
                 attributes={"kind": "gitlab_ci", "stages": stages, "job_count": len(jobs), "source_file": rel_path},
                 provenance=[prov],
@@ -101,9 +101,9 @@ class CIParser(BaseConfigParser):
         elif ".circleci" in rp:
             jobs = data.get("jobs", {})
             workflows = data.get("workflows", {})
-            node_id = make_node_id("Pipeline", "circleci", namespace)
+            node_id = make_node_id(NodeType.PIPELINE.value, "circleci", namespace)
             result.nodes.append(KGNode(
-                id=node_id, type="Pipeline", name="circleci",
+                id=node_id, type=NodeType.PIPELINE.value, name="circleci",
                 canonical_name="circleci", namespace=namespace,
                 attributes={"kind": "circleci", "job_count": len(jobs),
                             "workflow_count": len(workflows), "source_file": rel_path},
@@ -113,14 +113,14 @@ class CIParser(BaseConfigParser):
         # Create nodes for individual jobs
         if isinstance(jobs, dict):
             for job_name, job_config in list(jobs.items())[:50]:
-                job_id = make_node_id("Pipeline", f"{rel_path}/{job_name}", namespace)
+                job_id = make_node_id(NodeType.PIPELINE.value, f"{rel_path}/{job_name}", namespace)
                 needs = []
                 if isinstance(job_config, dict):
                     needs = job_config.get("needs", job_config.get("dependencies", []))
                     if isinstance(needs, str):
                         needs = [needs]
                 result.nodes.append(KGNode(
-                    id=job_id, type="Pipeline", name=job_name,
+                    id=job_id, type=NodeType.PIPELINE.value, name=job_name,
                     canonical_name=f"{rel_path}/{job_name}", namespace=namespace,
                     attributes={"kind": "ci_job", "source_file": rel_path},
                     provenance=[prov],
@@ -131,9 +131,9 @@ class CIParser(BaseConfigParser):
         """Basic Jenkinsfile parsing via regex (Groovy is not YAML/JSON)."""
         import re
         stages = re.findall(r"stage\s*\(\s*['\"]([^'\"]+)['\"]\s*\)", content)
-        node_id = make_node_id("Pipeline", "jenkins", namespace)
+        node_id = make_node_id(NodeType.PIPELINE.value, "jenkins", namespace)
         result.nodes.append(KGNode(
-            id=node_id, type="Pipeline", name="jenkins",
+            id=node_id, type=NodeType.PIPELINE.value, name="jenkins",
             canonical_name="jenkins", namespace=namespace,
             attributes={"kind": "jenkins", "stages": stages, "source_file": rel_path},
             provenance=[prov],

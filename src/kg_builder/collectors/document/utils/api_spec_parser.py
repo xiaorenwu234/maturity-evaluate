@@ -13,7 +13,7 @@ import yaml
 
 from ....graph.model import KGEdge, KGNode, Provenance, make_node_id
 from ....graph.ontology import NodeType, RelationType, SourceType
-from .base import BaseConfigParser, ParseResult
+from .base import BaseConfigParser, ParseResult, owner_service_node
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,9 @@ class ApiSpecParser(BaseConfigParser):
 
                 # Link to owner service via EXPOSES
                 if owner_service:
-                    svc_id = make_node_id(NodeType.SERVICE.value, owner_service, namespace)
-                    result.edges.append(KGEdge(svc_id, api_id, RelationType.EXPOSES.value,
+                    svc_node = owner_service_node(owner_service, namespace, rel_path, prov)
+                    result.nodes.append(svc_node)
+                    result.edges.append(KGEdge(svc_node.id, api_id, RelationType.EXPOSES.value,
                                                {"spec_file": rel_path}, [prov]))
 
         # Top-level API node summarizing the spec

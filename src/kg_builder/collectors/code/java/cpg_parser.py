@@ -31,6 +31,31 @@ class JavaCallRecord:
     line: int
 
 
+def _norm_path(p: str) -> str:
+    return (p or "").replace("\\", "/")
+
+
+def _same_file(a: str, b: str) -> bool:
+    """True when two path spellings point at the same source file.
+
+    Joern's dot export may carry absolute paths or bare file names while the
+    collector looks calls up with repo-relative paths, so exact equality alone
+    would make every call unresolved. Matching degrades exact -> path suffix ->
+    basename, which is safe for the one-public-class-per-file convention.
+    """
+    a, b = _norm_path(a), _norm_path(b)
+    if not a or not b:
+        return False
+    if a == b or a.endswith("/" + b) or b.endswith("/" + a):
+        return True
+    a_base, b_base = a.rsplit("/", 1)[-1], b.rsplit("/", 1)[-1]
+    if a_base != b_base:
+        return False
+    # Only a bare file name on one side is safe: two full paths with the same
+    # basename may still be different classes in different packages.
+    return "/" not in a or "/" not in b
+
+
 @dataclass
 class JavaCallIndex:
     methods_by_file: Dict[str, List[JavaMethodRecord]] = field(default_factory=dict)
@@ -38,7 +63,12 @@ class JavaCallIndex:
     methods_by_name: Dict[str, JavaMethodRecord] = field(default_factory=dict)
 
     def find_enclosing_method(self, file: str, line: int) -> Optional[JavaMethodRecord]:
-        methods = self.methods_by_file.get(file, [])
+        methods = self.methods_by_file.get(file)
+        if not methods:
+            methods = next(
+                (ms for f, ms in self.methods_by_file.items() if _same_file(f, file)),
+                [],
+            )
         best: Optional[JavaMethodRecord] = None
         for m in methods:
             if m.line <= line <= m.end_line:
@@ -47,7 +77,13 @@ class JavaCallIndex:
         return best
 
     def get_calls_at(self, file: str, line: int) -> List[JavaCallRecord]:
-        return self.calls_by_pos.get((file, line), [])
+        direct = self.calls_by_pos.get((file, line))
+        if direct:
+            return direct
+        for (f, ln), rows in self.calls_by_pos.items():
+            if ln == line and _same_file(f, file):
+                return rows
+        return []
 
 
 @dataclass
@@ -179,8 +215,8 @@ def resolve_java_call(
 ) -> Optional[ResolvedJavaCall]:
     """Resolve a Java call site using the Joern CPG index.
 
-    Falls back to simple heuristic matching when Joern index has no entry
-    for this position.
+    Returns ``None`` when Joern has no entry for this position -- there is no
+    name-matching fallback (unresolved calls produce no graph edge).
     """
     calls = index.get_calls_at(file, line)
     if not calls:

@@ -16,7 +16,31 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Optional
 
-from ....graph.model import KGEdge, KGNode
+from ....graph.model import KGEdge, KGNode, Provenance, make_node_id
+from ....graph.ontology import NodeType
+
+
+def owner_service_node(
+    owner_service: str,
+    namespace: str,
+    rel_path: str,
+    prov: Provenance,
+) -> KGNode:
+    """Build the Service node a parser is about to attach an edge to.
+
+    Parsers used to emit ``Service --X--> resource`` edges without emitting the
+    Service node itself, and the build pipeline then dropped those edges as
+    dangling. Emitting the endpoint keeps the relation.
+    """
+    return KGNode(
+        id=make_node_id(NodeType.SERVICE.value, owner_service, namespace),
+        type=NodeType.SERVICE.value,
+        name=owner_service,
+        canonical_name=owner_service,
+        namespace=namespace,
+        attributes={"declared_in": rel_path},
+        provenance=[prov],
+    )
 
 
 @dataclass

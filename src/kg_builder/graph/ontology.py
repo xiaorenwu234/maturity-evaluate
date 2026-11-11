@@ -13,10 +13,17 @@ It defines:
 
 The vocabulary intentionally mirrors the design spec:
 
-Nodes   : Service, Module, API, Function, Config, Database, Deployment,
-          Metric, Document, ExternalDependency
-Relations: CALLS, DEPENDS_ON, DEPLOYED_AS, CONFIGURED_BY, READS, WRITES,
-          EXPOSES, OBSERVED_BY, INHERITS, TEMPORALLY_COUPLED
+Nodes   : Service, Module, Class, API, Function, Config, Database, Deployment,
+          Metric, Document, ExternalDependency, plus the infrastructure kinds
+          actually emitted by the deployment / IaC / CI parsers (Namespace,
+          Pod, Infrastructure, AutoScaling, Container, Pipeline, Dashboard).
+Relations: CALLS, DEPENDS_ON, CONTAINS, DEPLOYED_AS, CONFIGURED_BY, READS,
+          WRITES, EXPOSES, OBSERVED_BY, INHERITS, TEMPORALLY_COUPLED, CLONE_OF,
+          IMPLEMENTS, MENTIONS, SCALES
+
+Every node type listed on :class:`NodeType` must be a type some collector really
+emits -- an unregistered type silently escapes validation and is invisible to
+downstream consumers that enumerate the ontology.
 """
 from __future__ import annotations
 
@@ -28,6 +35,7 @@ class NodeType(str, Enum):
 
     SERVICE = "Service"
     MODULE = "Module"
+    CLASS = "Class"
     API = "API"
     FUNCTION = "Function"
     CONFIG = "Config"
@@ -36,6 +44,14 @@ class NodeType(str, Enum):
     METRIC = "Metric"
     DOCUMENT = "Document"
     EXTERNAL_DEPENDENCY = "ExternalDependency"
+    # Infrastructure-side kinds (deployment collector / IaC / CI parsers).
+    NAMESPACE = "Namespace"
+    POD = "Pod"
+    INFRASTRUCTURE = "Infrastructure"
+    AUTOSCALING = "AutoScaling"
+    CONTAINER = "Container"
+    PIPELINE = "Pipeline"
+    DASHBOARD = "Dashboard"
 
     @classmethod
     def is_valid(cls, value: str) -> bool:
@@ -49,17 +65,20 @@ class RelationType(str, Enum):
     """
 
     CALLS = "CALLS"              # service/function -> service/function
-    DEPENDS_ON = "DEPENDS_ON"    # service/module -> external dependency / db / module
+    DEPENDS_ON = "DEPENDS_ON"    # service/module -> external dependency / db (true dependency only)
+    CONTAINS = "CONTAINS"        # module -> class/function/config, class -> function/api (structural containment)
     DEPLOYED_AS = "DEPLOYED_AS"  # service -> deployment
     CONFIGURED_BY = "CONFIGURED_BY"  # service/function/config -> config
     READS = "READS"              # function/service -> database (read access)
     WRITES = "WRITES"            # function/service -> database (write access)
     EXPOSES = "EXPOSES"          # service/module -> api
     OBSERVED_BY = "OBSERVED_BY"  # service/deployment -> metric
-    INHERITS = "INHERITS"        # service/class -> service/class (type hierarchy)
+    INHERITS = "INHERITS"        # class -> class (type hierarchy)
     TEMPORALLY_COUPLED = "TEMPORALLY_COUPLED"  # module -> module (co-changed in VCS)
     CLONE_OF = "CLONE_OF"        # function -> function (type-2 duplicate body)
-    IMPLEMENTS = "IMPLEMENTS"    # service -> module/file (LLM/doc-derived mapping)
+    IMPLEMENTS = "IMPLEMENTS"    # service -> class (business service overlay bound to its code class)
+    MENTIONS = "MENTIONS"        # document -> entity the document describes
+    SCALES = "SCALES"            # autoscaler -> deployment (HPA targets a workload)
 
     @classmethod
     def is_valid(cls, value: str) -> bool:
@@ -86,6 +105,7 @@ class SourceType(str, Enum):
 NODE_TYPE_LABELS: dict[str, str] = {
     NodeType.SERVICE.value: "服务",
     NodeType.MODULE.value: "模块",
+    NodeType.CLASS.value: "类",
     NodeType.API.value: "接口",
     NodeType.FUNCTION.value: "函数/方法",
     NodeType.CONFIG.value: "配置项",
@@ -94,4 +114,11 @@ NODE_TYPE_LABELS: dict[str, str] = {
     NodeType.METRIC.value: "指标",
     NodeType.DOCUMENT.value: "文档",
     NodeType.EXTERNAL_DEPENDENCY.value: "外部依赖",
+    NodeType.NAMESPACE.value: "命名空间",
+    NodeType.POD.value: "Pod",
+    NodeType.INFRASTRUCTURE.value: "基础设施",
+    NodeType.AUTOSCALING.value: "弹性伸缩",
+    NodeType.CONTAINER.value: "容器",
+    NodeType.PIPELINE.value: "流水线",
+    NodeType.DASHBOARD.value: "监控面板",
 }

@@ -51,8 +51,17 @@ _DB_URL_RE = re.compile(
 _HOST_RE = re.compile(r"https?://([A-Za-z0-9._\-]+)", re.I)
 
 
-def enrich_all(artifacts: Iterable[FileArtifact], repo_path: Path) -> dict:
+def enrich_all(
+    artifacts: Iterable[FileArtifact],
+    repo_path: Path,
+    exclude_dirs: Iterable[str] | None = None,
+) -> dict:
     """Run Semgrep once over ``repo_path`` and attach findings to artifacts.
+
+    ``exclude_dirs`` mirrors ``code.exclude_dirs`` and is forwarded to Semgrep so
+    vendored trees (node_modules / vendor / dist ...) are not scanned; the code
+    collector's own walk prunes the same directories, keeping both channels in
+    agreement.
 
     Returns a status dict shaped like::
 
@@ -82,7 +91,9 @@ def enrich_all(artifacts: Iterable[FileArtifact], repo_path: Path) -> dict:
         return status
 
     try:
-        findings = scan_repo(repo_path, RULES_DIR)
+        findings = scan_repo(
+            repo_path, RULES_DIR, extra_excludes=list(exclude_dirs or []),
+        )
     except SemgrepError as exc:
         status["ok"] = False
         status["warnings"].append(f"semgrep scan failed: {exc}")
@@ -185,10 +196,17 @@ def _apply_resource(art: FileArtifact, f: Finding) -> str | None:
 
 
 def _resolve_target(payload: dict, category: str) -> str | None:
-    """Pick the best concrete target for a resource finding."""
+    """Pick the best concrete target for a resource finding.
+
+    Returns ``None`` when no *concrete* identity can be derived. Callers then
+    drop the finding rather than minting an anonymous ``database`` / ``cache``
+    node: an unnamed "this touches some DB" fact adds no navigable entity and
+    collides across repositories, so it is better left as a plain call.
+    """
     # 1. Explicit URL captured from the rule ($URL / $DEFAULT string literal).
     raw_url = payload.get("u")
     if isinstance(raw_url, str) and raw_url:
+        raw_url = raw_url.strip().strip("'\"")
         if category == "database":
             m = _DB_URL_RE.search(raw_url)
             if m:
@@ -196,17 +214,15 @@ def _resolve_target(payload: dict, category: str) -> str | None:
         host = _HOST_RE.search(raw_url)
         if host:
             return host.group(1)
-    # 2. Rule-declared name (e.g. "sqlalchemy", "httpx", "order_repo").
+    # 2. Rule-declared name (e.g. "sqlalchemy", "httpx", "order_repo", a captured
+    #    ``db="warehouse"`` value). Strip quotes a string-literal metavariable brings in.
     name = payload.get("name")
-    if isinstance(name, str) and name:
-        return name
-    # 3. Fallback per-category default so we still create a node.
-    return {
-        "database": "database",
-        "cache": "cache",
-        "message_queue": "message_queue",
-        "external_service": "external_service",
-    }.get(category)
+    if isinstance(name, str):
+        name = name.strip().strip("'\"")
+        if name:
+            return name
+    # 3. No concrete identity -- skip instead of inventing a generic node.
+    return None
 
 
 # ---------------------------------------------------------------------------- configs

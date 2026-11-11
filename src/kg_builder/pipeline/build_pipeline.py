@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from ..collectors import BaseCollector, CollectorResult, build_collectors
 from ..config import BuildSettings
 from ..enrichment import SemanticEnricher, create_llm_client
+from ..graph.entity_resolution import resolve_entities
 from ..graph.knowledge_graph import KnowledgeGraph
 from ..graph.model import KGEdge, KGNode
 from ..graph.serialization import save_graph, to_cypher, to_mermaid
@@ -54,6 +56,11 @@ class BuildReport:
         lines.append("provenance by source:")
         for k, v in sorted(s["provenance_by_source"].items()):
             lines.append(f"  - {k:18s} {v}")
+        resolution = self.graph.meta.get("entity_resolution") or {}
+        if resolution.get("merged_nodes"):
+            lines.append(f"entity resolution: merged {resolution['merged_nodes']} name variant(s)")
+            for g in resolution.get("groups", []):
+                lines.append(f"  - {g['primary']} <- {', '.join(g['merged'])}")
         if self.enrichment:
             lines.append("semantic enrichment:")
             for k, v in self.enrichment.items():
@@ -92,8 +99,10 @@ class BuildPipeline:
             warnings.extend(f"[{c.name}] {w}" for w in res.warnings)
 
         graph = self._merge(results)
+        resolution = resolve_entities(graph)
         cfg_payload = self._fold_extras(graph, results)
         report = self._enrich(graph, results, warnings, llm_client)
+        self._record_meta(graph, results, report, resolution)
 
         if write_outputs:
             report.output_path = self._write(graph, report, cfg_payload)
@@ -164,6 +173,43 @@ class BuildPipeline:
                 "groups": clone_groups,
             }
         return {"functions": cfg} if cfg else None
+
+    # ----------------------------------------------------------------- meta
+    def _record_meta(
+        self,
+        graph: KnowledgeGraph,
+        results: list[CollectorResult],
+        report: "BuildReport",
+        resolution: dict[str, Any],
+    ) -> None:
+        """Publish a build summary on ``graph.meta``.
+
+        Module 2 gets the build context (which collectors ran, what was merged,
+        how connected the graph is) without having to re-derive it from nodes.
+        """
+        touched = {e.source for e in graph.edges} | {e.target for e in graph.edges}
+        stats = report.stats
+        graph.meta["build"] = {
+            "repo_path": str(self.settings.repo_path),
+            "namespace": self.settings.namespace,
+            "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "enriched": not (report.enrichment or {}).get("skipped", False),
+            "node_count": stats["node_count"],
+            "edge_count": stats["edge_count"],
+            "isolated_nodes": sum(1 for n in graph.nodes if n.id not in touched),
+            "collectors": [
+                {
+                    "name": r.collector,
+                    "nodes": len(r.nodes),
+                    "edges": len(r.edges),
+                    "warnings": len(r.warnings),
+                    "metrics": r.metrics,
+                }
+                for r in results
+            ],
+            "warnings": report.warnings[:20],
+        }
+        graph.meta["entity_resolution"] = resolution
 
     # ---------------------------------------------------------------- write
     def _write(self, graph: KnowledgeGraph, report: BuildReport, cfg_payload: Optional[dict] = None) -> Path:

@@ -28,7 +28,24 @@ rules:
   - id: kgb-db-pymysql-connect
     languages: [python]
     severity: INFO
-    pattern: pymysql.connect(...)
+    patterns:
+      - pattern-either:
+          - pattern: pymysql.connect(..., db=$DB, ...)
+          - pattern: pymysql.connect(..., database=$DB, ...)
+    # $DB is a string literal whose own quotes form the JSON delimiters, so it is
+    # interpolated *unquoted* (same contract as ``u":$URL"`` in create-engine).
+    message: 'kgb-json {"t":"resource","cat":"database","name":$DB}'
+    metadata:
+      kgb_type: resource
+
+  # Engine-name fallback only when no concrete db name was supplied.
+  - id: kgb-db-pymysql-engine
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern: pymysql.connect(...)
+      - pattern-not: pymysql.connect(..., db=$DB, ...)
+      - pattern-not: pymysql.connect(..., database=$DB, ...)
     message: 'kgb-json {"t":"resource","cat":"database","name":"mysql"}'
     metadata:
       kgb_type: resource
@@ -36,7 +53,21 @@ rules:
   - id: kgb-db-psycopg2-connect
     languages: [python]
     severity: INFO
-    pattern: psycopg2.connect(...)
+    patterns:
+      - pattern-either:
+          - pattern: psycopg2.connect(..., dbname=$DB, ...)
+          - pattern: psycopg2.connect(..., database=$DB, ...)
+    message: 'kgb-json {"t":"resource","cat":"database","name":$DB}'
+    metadata:
+      kgb_type: resource
+
+  - id: kgb-db-psycopg2-engine
+    languages: [python]
+    severity: INFO
+    patterns:
+      - pattern: psycopg2.connect(...)
+      - pattern-not: psycopg2.connect(..., dbname=$DB, ...)
+      - pattern-not: psycopg2.connect(..., database=$DB, ...)
     message: 'kgb-json {"t":"resource","cat":"database","name":"postgres"}'
     metadata:
       kgb_type: resource

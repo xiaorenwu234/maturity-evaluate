@@ -71,6 +71,47 @@ class KnowledgeGraph:
     def get_node(self, node_id: str) -> Optional[KGNode]:
         return self._nodes.get(node_id)
 
+    def merge_nodes(self, primary_id: str, alias_ids: Iterable[str]) -> Optional[KGNode]:
+        """Fold ``alias_ids`` into ``primary_id`` (entity resolution).
+
+        Attributes and provenance of the aliases accumulate on the primary node
+        and every edge touching an alias is redirected, so a name variant
+        (``OrderService`` vs ``order-service``) stops being a second entity.
+        Edges that become self-loops are dropped: after the merge they only say
+        "this entity relates to itself", which carries no information.
+        """
+        primary = self._nodes.get(primary_id)
+        if primary is None:
+            raise KeyError(f"merge_nodes: primary node {primary_id} not found")
+        aliases = [a for a in alias_ids if a in self._nodes and a != primary_id]
+        if not aliases:
+            return primary
+
+        for alias_id in aliases:
+            alias = self._nodes.pop(alias_id)
+            for k, v in alias.attributes.items():
+                primary.attributes.setdefault(k, v)
+            for prov in alias.provenance:
+                primary.add_provenance(prov)
+
+        redirect = {a: primary_id for a in aliases}
+        merged: dict[tuple[str, str, str], KGEdge] = {}
+        for edge in self._edges.values():
+            edge.source = redirect.get(edge.source, edge.source)
+            edge.target = redirect.get(edge.target, edge.target)
+            if edge.source == edge.target:
+                continue
+            existing = merged.get(edge.key)
+            if existing is None:
+                merged[edge.key] = edge
+                continue
+            for k, v in edge.attributes.items():
+                existing.attributes.setdefault(k, v)
+            for prov in edge.provenance:
+                existing.add_provenance(prov)
+        self._edges = merged
+        return primary
+
     def find_nodes(
         self,
         type: Optional[NodeType | str] = None,

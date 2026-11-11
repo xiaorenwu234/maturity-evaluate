@@ -48,3 +48,11 @@ examples/sample_repo/__pycache__/
 examples/comprehensive_test_repo/**/__pycache__/
 pytest-of-xueht
 cloud-native-maturity-evaluate/
+
+# Downloaded CLI binaries (external tools, not source)
+/grpcurl
+/grpcurl_*.tar.gz
+/minikube-linux-amd64
+
+# Independent demo repository (tracked separately on GitHub)
+otel-bench-demo/

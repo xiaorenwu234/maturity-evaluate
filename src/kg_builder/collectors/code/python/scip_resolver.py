@@ -1,19 +1,24 @@
 """Parse an ``index.scip`` file into lookup tables for call resolution.
 
-Uses ``protoc --decode_raw`` to avoid protobuf runtime version mismatches.
-The raw text output is parsed with a line-by-line state machine to extract
-document paths, symbol definitions, and reference occurrences.
+The index is a protobuf ``scip.Index`` message. We decode the wire format
+directly instead of shelling out to ``protoc --decode_raw``: the textual dump
+is a best-effort rendering whose layout shifts between protoc releases (it
+mangles non-ASCII paths and mis-nests fields), which silently produced empty
+indexes on real repositories.
 
-Hard-failure semantics: if protoc is unavailable or the index cannot be
-parsed, raise immediately. There is no fallback.
+Hard-failure semantics: if the index is missing or malformed, raise
+immediately. There is no fallback.
 """
 from __future__ import annotations
 
 import re
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+#: ``SymbolRole.Definition`` -- a bitflag, not an enum. ``role`` may carry
+#: several bits at once (e.g. definition + read access).
+_ROLE_DEFINITION = 1
 
 
 @dataclass
@@ -110,135 +115,120 @@ def _symbol_to_qname(symbol: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Line-by-line state-machine parser for protoc --decode_raw output
+# Protobuf wire-format decoding
 # ---------------------------------------------------------------------------
 
-def _parse_decode_raw(text: str) -> ScipIndex:
-    """Parse ``protoc --decode_raw`` text output into lookup tables.
+def _read_varint(buf: bytes, pos: int) -> Tuple[int, int]:
+    """Read one base-128 varint; returns ``(value, next_pos)``."""
+    value = 0
+    shift = 0
+    while True:
+        if pos >= len(buf):
+            raise ValueError("truncated varint in SCIP index")
+        byte = buf[pos]
+        pos += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, pos
+        shift += 7
+        if shift > 63:
+            raise ValueError("varint too long in SCIP index")
 
-    Uses a line-by-line state machine instead of regex-with-DOTALL to avoid
-    cross-block contamination from nested braces in the decode_raw format.
-    """
-    result = ScipIndex()
-    lines = text.split("\n")
 
-    rel_path: Optional[str] = None
-    # State for current symbol entry being accumulated.
-    in_sym_block = False
-    brace_depth = 0
-    range_bytes: Optional[str] = None
-    symbol_str: Optional[str] = None
-    role: Optional[int] = None
-
-    def _flush_sym():
-        nonlocal range_bytes, symbol_str, role
-        if symbol_str and role is not None and rel_path:
-            qname = _symbol_to_qname(symbol_str)
-            result.symbols.add(symbol_str)
-            decoded = _decode_range_bytes(range_bytes or "")
-            if role == 1:  # Definition
-                rec = DefinitionRecord(
-                    symbol=symbol_str, qname=qname, file=rel_path,
-                    start_line=decoded[0] if decoded else 1,
-                    end_line=decoded[2] if len(decoded) > 2 else (decoded[0] if decoded else 1),
-                )
-                result.definitions_by_file.setdefault(rel_path, []).append(rec)
-            elif role in (8, 4, 2):  # Reference / import / read
-                ln = decoded[0] if decoded else 0
-                if ln > 0:
-                    ref = ReferenceRecord(symbol=symbol_str, qname=qname, file=rel_path, line=ln)
-                    result.references_by_pos.setdefault((rel_path, ln), []).append(ref)
-        range_bytes = None
-        symbol_str = None
-        role = None
-
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        stripped = line.strip()
-
-        # Track brace depth to know when we exit a symbol block.
-        open_braces = stripped.count("{")
-        close_braces = stripped.count("}")
-
-        # Detect document-level relative_path: "1: \"path\"" at depth 1.
-        if not in_sym_block and brace_depth == 1:
-            pm = re.match(r'^1:\s*"(.*?)"\s*$', stripped)
-            if pm:
-                rel_path = pm.group(1)
-
-        # Detect start of a symbol/occurrence block: "2 {" at document level.
-        if not in_sym_block and brace_depth == 1 and stripped == "2 {":
-            in_sym_block = True
-            brace_depth += open_braces  # count the opening brace
-            i += 1
-            continue
-
-        if in_sym_block:
-            brace_depth += open_braces - close_braces
-
-            # Field 1: range bytes (escaped byte string).
-            fm1 = re.match(r'^1:\s*"(.*?)"\s*$', stripped)
-            if fm1:
-                range_bytes = fm1.group(1)
-
-            # Field 2: symbol string.
-            fm2 = re.match(r'^2:\s*"(.*?)"\s*$', stripped)
-            if fm2:
-                symbol_str = fm2.group(1)
-
-            # Field 3: role integer.
-            fm3 = re.match(r'^3:\s*(\d+)\s*$', stripped)
-            if fm3:
-                role = int(fm3.group(1))
-
-            # Block ended.
-            if brace_depth <= 1:
-                _flush_sym()
-                in_sym_block = False
-
+def _iter_fields(buf: bytes) -> Iterator[Tuple[int, int, Any]]:
+    """Yield ``(field_number, wire_type, value)`` for a protobuf message."""
+    pos = 0
+    while pos < len(buf):
+        key, pos = _read_varint(buf, pos)
+        field_no, wire = key >> 3, key & 7
+        if wire == 0:            # varint
+            value, pos = _read_varint(buf, pos)
+        elif wire == 1:          # fixed64
+            value = buf[pos:pos + 8]
+            pos += 8
+        elif wire == 2:          # length-delimited
+            length, pos = _read_varint(buf, pos)
+            value = buf[pos:pos + length]
+            pos += length
+        elif wire == 5:          # fixed32
+            value = buf[pos:pos + 4]
+            pos += 4
         else:
-            brace_depth += open_braces - close_braces
-            # Reset path when leaving a document block.
-            if brace_depth <= 0:
-                rel_path = None
-                brace_depth = 0
+            raise ValueError(f"unsupported protobuf wire type {wire} in SCIP index")
+        if pos > len(buf):
+            raise ValueError("truncated field in SCIP index")
+        yield field_no, wire, value
 
-        i += 1
 
-    # Flush any trailing symbol.
-    if in_sym_block:
-        _flush_sym()
+def _decode_packed_varints(raw: bytes) -> List[int]:
+    values: List[int] = []
+    pos = 0
+    while pos < len(raw):
+        value, pos = _read_varint(raw, pos)
+        values.append(value)
+    return values
 
-    # Sort definitions per file by start_line.
+
+def _parse_occurrence(blob: bytes, rel_path: str, result: ScipIndex) -> None:
+    """Decode one ``Occurrence`` message into a definition or reference record."""
+    range_vals: List[int] = []
+    symbol = ""
+    role = 0
+    for field_no, wire, value in _iter_fields(blob):
+        if field_no == 1:                       # range (packed or repeated int32)
+            if wire == 2:
+                range_vals.extend(_decode_packed_varints(value))
+            elif wire == 0:
+                range_vals.append(value)
+        elif field_no == 2 and wire == 2:       # symbol
+            symbol = value.decode("utf-8", "replace")
+        elif field_no == 3 and wire == 0:       # symbol_roles (bitflags)
+            role |= value
+    if not symbol or not range_vals:
+        return
+    # Local variables are defined at their assignment line and would shadow the
+    # real enclosing function/class when looking up "which def contains line X".
+    if symbol.startswith("local "):
+        return
+
+    qname = _symbol_to_qname(symbol)
+    result.symbols.add(symbol)
+    start_line = range_vals[0] + 1              # SCIP lines are 0-based
+    end_line = (range_vals[2] if len(range_vals) >= 4 else range_vals[0]) + 1
+    if role & _ROLE_DEFINITION:
+        result.definitions_by_file.setdefault(rel_path, []).append(DefinitionRecord(
+            symbol=symbol, qname=qname, file=rel_path,
+            start_line=start_line, end_line=end_line,
+        ))
+    else:
+        result.references_by_pos.setdefault((rel_path, start_line), []).append(
+            ReferenceRecord(symbol=symbol, qname=qname, file=rel_path, line=start_line)
+        )
+
+
+def _parse_document(blob: bytes, result: ScipIndex) -> None:
+    rel_path = ""
+    occurrences: List[bytes] = []
+    for field_no, wire, value in _iter_fields(blob):
+        if field_no == 1 and wire == 2:         # relative_path
+            rel_path = value.decode("utf-8", "replace")
+        elif field_no == 2 and wire == 2:       # occurrences
+            occurrences.append(value)
+    if not rel_path:
+        return
+    for occ in occurrences:
+        _parse_occurrence(occ, rel_path, result)
+
+
+def _parse_index_bytes(data: bytes) -> ScipIndex:
+    """Decode a serialized ``scip.Index`` message."""
+    result = ScipIndex()
+    for field_no, wire, value in _iter_fields(data):
+        if field_no == 2 and wire == 2:         # documents
+            _parse_document(value, result)
     for defs in result.definitions_by_file.values():
         defs.sort(key=lambda d: d.start_line)
-
     return result
-
-
-def _decode_range_bytes(raw: str) -> list[int]:
-    """Decode escaped byte string from decode_raw into line numbers."""
-    if not raw:
-        return []
-    try:
-        byte_str = raw.encode("utf-8").decode("unicode_escape").encode("latin-1")
-    except Exception:
-        return []
-    values: list[int] = []
-    i = 0
-    while i < len(byte_str):
-        val = 0
-        shift = 0
-        while i < len(byte_str):
-            b = byte_str[i]
-            val |= (b & 0x7F) << shift
-            i += 1
-            if not (b & 0x80):
-                break
-            shift += 7
-        values.append(val)
-    return values
 
 
 # ---------------------------------------------------------------------------
@@ -246,22 +236,18 @@ def _decode_range_bytes(raw: str) -> list[int]:
 # ---------------------------------------------------------------------------
 
 def load_index(scip_path: Path, repo_root: Path) -> ScipIndex:
+    """Load and decode an ``index.scip`` file.
+
+    ``repo_root`` is accepted for signature stability (paths in the index are
+    already repo-relative); it is not needed for decoding.
+    """
     scip_path = Path(scip_path)
     if not scip_path.exists():
         raise FileNotFoundError(f"SCIP index not found: {scip_path}")
-    try:
-        result = subprocess.run(
-            ["protoc", "--decode_raw"],
-            stdin=open(scip_path, "rb"),
-            capture_output=True, text=True, timeout=60,
-        )
-    except FileNotFoundError:
-        raise ImportError("protoc not found in PATH; required for SCIP index parsing")
-    except subprocess.TimeoutExpired:
-        raise RuntimeError("protoc --decode_raw timed out on SCIP index")
-    if result.returncode != 0:
-        raise RuntimeError(f"protoc --decode_raw failed: {result.stderr[:300]}")
-    return _parse_decode_raw(result.stdout)
+    data = scip_path.read_bytes()
+    if not data:
+        raise ValueError(f"SCIP index is empty: {scip_path}")
+    return _parse_index_bytes(data)
 
 
 # ---------------------------------------------------------------------------

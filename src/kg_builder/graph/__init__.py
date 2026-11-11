@@ -1,6 +1,7 @@
 """Public API of the knowledge-graph core."""
 from __future__ import annotations
 
+from .entity_resolution import resolve_entities, service_key
 from .knowledge_graph import KnowledgeGraph
 from .model import KGEdge, KGNode, Provenance, make_node_id
 from .ontology import NODE_TYPE_LABELS, NodeType, RelationType, SourceType

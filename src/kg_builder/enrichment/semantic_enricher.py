@@ -130,7 +130,7 @@ class SemanticEnricher:
         annotated = 0
         for chunk in _chunks(configs, self.max_items_per_call):
             listing = "\n".join(
-                f"- {c.canonical_name} = {c.attributes.get('value')} (file={c.attributes.get('source_file')})"
+                f"- {c.canonical_name} = {_config_value(c)} (file={_config_file(c)})"
                 for c in chunk
             )
             user = (
@@ -165,6 +165,26 @@ class SemanticEnricher:
                 detail={"method": "llm", "model": getattr(self.llm, "_settings", None) and self.llm._settings.model},
             )
         )
+
+
+def _config_value(config) -> str:
+    """Readable default for a Config node across collectors.
+
+    Code-derived nodes store ``default`` (Semgrep) and document parsers store
+    ``value``; read both so the prompt never shows ``None`` for one channel.
+    """
+    value = config.attributes.get("value")
+    if value is None:
+        value = config.attributes.get("default")
+    return "(unspecified)" if value is None else str(value)
+
+
+def _config_file(config) -> str:
+    return str(
+        config.attributes.get("source_file")
+        or config.attributes.get("file")
+        or "(unknown)"
+    )
 
 
 def _dump_service(graph, s, calls_out, calls_in, exposes) -> str:

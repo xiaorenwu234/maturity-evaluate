@@ -23,6 +23,18 @@ from ...base import CollectorResult
 logger = logging.getLogger(__name__)
 
 
+def _selector_matches(selector: dict, labels: dict) -> bool:
+    """True when every selector entry is present on the pod's labels."""
+    return bool(selector) and all(labels.get(k) == v for k, v in selector.items())
+
+
+def _template_labels(spec) -> dict:
+    """Pod template labels of a workload spec (empty when unavailable)."""
+    template = getattr(spec, "template", None)
+    metadata = getattr(template, "metadata", None)
+    return dict(getattr(metadata, "labels", None) or {})
+
+
 class K8sCollector:
     """Kubernetes sub-collector.
 
@@ -35,11 +47,18 @@ class K8sCollector:
     def __init__(self, dep_settings: DeploymentSettings, graph_namespace: str = "") -> None:
         self.dep = dep_settings
         self.namespace = graph_namespace
+        # (namespace, workload node id, pod labels) collected before pods so
+        # Pod -> workload edges can be emitted from label selectors.
+        self._workloads: list[tuple[str, str, dict]] = []
+        # (namespace, service node id, selector) for Service -> Pod edges.
+        self._service_selectors: list[tuple[str, str, dict]] = []
 
     def collect(self) -> tuple[list[KGNode], list[KGEdge], list[str]]:
         nodes: list[KGNode] = []
         edges: list[KGEdge] = []
         warnings: list[str] = []
+        self._workloads = []
+        self._service_selectors = []
 
         try:
             from kubernetes import client, config as k8s_config
@@ -75,8 +94,9 @@ class K8sCollector:
             self._collect_namespace(nodes, edges, v1, ns, cluster)
             self._collect_deployments(nodes, edges, apps_v1, ns, cluster)
             self._collect_statefulsets(nodes, edges, apps_v1, ns, cluster)
-            self._collect_pods(nodes, edges, v1, ns, cluster)
+            # Services first: their selectors drive Service -> Pod edges below.
             self._collect_services(nodes, edges, v1, ns, cluster)
+            self._collect_pods(nodes, edges, v1, ns, cluster)
             self._collect_ingresses(nodes, edges, v1, ns, cluster)
             self._collect_hpa(nodes, edges, autoscaling_v1, ns, cluster)
 
@@ -104,9 +124,9 @@ class K8sCollector:
 
     def _collect_namespace(self, nodes: list, edges: list, v1, ns: str, cluster: str):
         prov = self._prov(f"{cluster}/namespace/{ns}", f"namespace {ns}")
-        node_id = make_node_id("Namespace", ns, self.namespace)
+        node_id = make_node_id(NodeType.NAMESPACE.value, ns, self.namespace)
         nodes.append(KGNode(
-            id=node_id, type="Namespace", name=ns, canonical_name=ns,
+            id=node_id, type=NodeType.NAMESPACE.value, name=ns, canonical_name=ns,
             namespace=self.namespace,
             attributes={"cluster": cluster},
             provenance=[prov],
@@ -126,6 +146,7 @@ class K8sCollector:
             prov = self._prov(f"{cluster}/{ns}/deployment/{meta.name}", str(meta.name))
 
             dep_id = make_node_id(NodeType.DEPLOYMENT.value, f"{ns}/{meta.name}", self.namespace)
+            pod_labels = _template_labels(spec)
             nodes.append(KGNode(
                 id=dep_id, type=NodeType.DEPLOYMENT.value, name=meta.name,
                 canonical_name=f"{ns}/{meta.name}", namespace=self.namespace,
@@ -135,9 +156,11 @@ class K8sCollector:
                     "ready_replicas": status.ready_replicas,
                     "strategy": spec.strategy.type if spec.strategy else None,
                     "labels": dict(meta.labels or {}),
+                    "pod_labels": pod_labels,
                 },
                 provenance=[prov],
             ))
+            self._workloads.append((ns, dep_id, pod_labels))
 
             # Link to service if labels match (heuristic: same name)
             svc_id = make_node_id(NodeType.SERVICE.value, meta.name, self.namespace)
@@ -157,6 +180,7 @@ class K8sCollector:
             prov = self._prov(f"{cluster}/{ns}/statefulset/{meta.name}", str(meta.name))
 
             sts_id = make_node_id(NodeType.DEPLOYMENT.value, f"{ns}/{meta.name}", self.namespace)
+            pod_labels = _template_labels(spec)
             nodes.append(KGNode(
                 id=sts_id, type=NodeType.DEPLOYMENT.value, name=meta.name,
                 canonical_name=f"{ns}/{meta.name}", namespace=self.namespace,
@@ -166,9 +190,11 @@ class K8sCollector:
                     "replicas": spec.replicas,
                     "service_name": spec.service_name,
                     "labels": dict(meta.labels or {}),
+                    "pod_labels": pod_labels,
                 },
                 provenance=[prov],
             ))
+            self._workloads.append((ns, sts_id, pod_labels))
 
     def _collect_pods(self, nodes: list, edges: list, v1, ns: str, cluster: str):
         try:
@@ -197,9 +223,10 @@ class K8sCollector:
                 readiness_probe = c0.readiness_probe is not None
                 liveness_probe = c0.liveness_probe is not None
 
-            pod_id = make_node_id("Pod", f"{ns}/{meta.name}", self.namespace)
+            pod_id = make_node_id(NodeType.POD.value, f"{ns}/{meta.name}", self.namespace)
+            pod_labels = dict(meta.labels or {})
             nodes.append(KGNode(
-                id=pod_id, type="Pod", name=meta.name,
+                id=pod_id, type=NodeType.POD.value, name=meta.name,
                 canonical_name=f"{ns}/{meta.name}", namespace=self.namespace,
                 attributes={
                     "cluster": cluster, "namespace": ns,
@@ -210,10 +237,28 @@ class K8sCollector:
                     "resources": resources,
                     "readiness_probe": readiness_probe,
                     "liveness_probe": liveness_probe,
-                    "labels": dict(meta.labels or {}),
+                    "labels": pod_labels,
                 },
                 provenance=[prov],
             ))
+
+            # Pod -> workload (label selector from the pod template). The first
+            # matching workload in the namespace owns the pod.
+            for wl_ns, wl_id, wl_labels in self._workloads:
+                if wl_ns == ns and _selector_matches(wl_labels, pod_labels):
+                    edges.append(KGEdge(
+                        pod_id, wl_id, RelationType.DEPENDS_ON.value,
+                        {"kind": "instance_of", "selector": wl_labels}, [prov],
+                    ))
+                    break
+
+            # Service -> Pod (the inverse of the service selector).
+            for svc_ns, svc_id, selector in self._service_selectors:
+                if svc_ns == ns and _selector_matches(selector, pod_labels):
+                    edges.append(KGEdge(
+                        svc_id, pod_id, RelationType.DEPENDS_ON.value,
+                        {"kind": "routes_to", "selector": selector}, [prov],
+                    ))
 
     def _collect_services(self, nodes: list, edges: list, v1, ns: str, cluster: str):
         try:
@@ -232,6 +277,7 @@ class K8sCollector:
             if spec.ports:
                 ports = [{"port": p.port, "target_port": p.target_port, "protocol": p.protocol}
                          for p in spec.ports]
+            selector = dict(spec.selector or {})
 
             nodes.append(KGNode(
                 id=svc_id, type=NodeType.SERVICE.value, name=meta.name,
@@ -241,10 +287,12 @@ class K8sCollector:
                     "service_type": spec.type,
                     "cluster_ip": spec.cluster_ip,
                     "ports": ports,
+                    "selector": selector,
                     "labels": dict(meta.labels or {}),
                 },
                 provenance=[prov],
             ))
+            self._service_selectors.append((ns, svc_id, selector))
 
     def _collect_ingresses(self, nodes: list, edges: list, v1, ns: str, cluster: str):
         try:
@@ -287,9 +335,9 @@ class K8sCollector:
             spec = hpa.spec
             prov = self._prov(f"{cluster}/{ns}/hpa/{meta.name}", str(meta.name))
 
-            hpa_id = make_node_id("AutoScaling", f"{ns}/{meta.name}", self.namespace)
+            hpa_id = make_node_id(NodeType.AUTOSCALING.value, f"{ns}/{meta.name}", self.namespace)
             nodes.append(KGNode(
-                id=hpa_id, type="AutoScaling", name=meta.name,
+                id=hpa_id, type=NodeType.AUTOSCALING.value, name=meta.name,
                 canonical_name=f"{ns}/{meta.name}", namespace=self.namespace,
                 attributes={
                     "cluster": cluster, "namespace": ns,
@@ -305,7 +353,7 @@ class K8sCollector:
             if spec.scale_target_ref:
                 target_id = make_node_id(NodeType.DEPLOYMENT.value,
                                          f"{ns}/{spec.scale_target_ref.name}", self.namespace)
-                edges.append(KGEdge(hpa_id, target_id, "SCALES", {}, [prov]))
+                edges.append(KGEdge(hpa_id, target_id, RelationType.SCALES.value, {}, [prov]))
 
     def _collect_nodes(self, nodes: list, edges: list, v1, cluster: str):
         try:
@@ -323,9 +371,9 @@ class K8sCollector:
             if status.capacity:
                 capacity = dict(status.capacity)
 
-            node_id = make_node_id("Infrastructure", f"k8s-node/{meta.name}", self.namespace)
+            node_id = make_node_id(NodeType.INFRASTRUCTURE.value, f"k8s-node/{meta.name}", self.namespace)
             nodes.append(KGNode(
-                id=node_id, type="Infrastructure", name=meta.name,
+                id=node_id, type=NodeType.INFRASTRUCTURE.value, name=meta.name,
                 canonical_name=f"k8s-node/{meta.name}", namespace=self.namespace,
                 attributes={
                     "cluster": cluster,

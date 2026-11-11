@@ -15,7 +15,7 @@ import yaml
 
 from ....graph.model import KGEdge, KGNode, Provenance, make_node_id
 from ....graph.ontology import NodeType, RelationType, SourceType
-from .base import BaseConfigParser, ParseResult
+from .base import BaseConfigParser, ParseResult, owner_service_node
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,13 @@ class AppConfigParser(BaseConfigParser):
             cfg_id = make_node_id(NodeType.CONFIG.value, key.lower(), namespace)
             attrs: dict[str, Any] = {"value": str(value)[:120], "source_file": rel_path}
 
+            # A config file may declare several top-level component blocks (e.g.
+            # ``PaymentService:`` and ``RedisCache:`` side by side). The file-level
+            # owner is only a fallback: when a key sits under a PascalCase block
+            # that names a different component, attribute it to that block instead
+            # of hanging every key on the single file owner.
+            owner = self._block_owner(key, owner_service)
+
             # Detect external dependencies in values
             val_str = str(value)
             if _DB_PATTERN.search(val_str):
@@ -79,9 +86,10 @@ class AppConfigParser(BaseConfigParser):
                 attributes=attrs, provenance=[prov],
             ))
 
-            if owner_service:
-                svc_id = make_node_id(NodeType.SERVICE.value, owner_service, namespace)
-                result.edges.append(KGEdge(svc_id, cfg_id, RelationType.CONFIGURED_BY.value,
+            if owner:
+                svc_node = owner_service_node(owner, namespace, rel_path, prov)
+                result.nodes.append(svc_node)
+                result.edges.append(KGEdge(svc_node.id, cfg_id, RelationType.CONFIGURED_BY.value,
                                            {"declared_in": rel_path}, [prov]))
 
                 # External dependency edges
@@ -95,10 +103,24 @@ class AppConfigParser(BaseConfigParser):
                         namespace=namespace, attributes={"kind": ext_kind, "config_key": key},
                         provenance=[prov],
                     ))
-                    result.edges.append(KGEdge(svc_id, ext_id, RelationType.DEPENDS_ON.value,
+                    result.edges.append(KGEdge(svc_node.id, ext_id, RelationType.DEPENDS_ON.value,
                                                {"kind": ext_kind, "via_config": rel_path}, [prov]))
 
         return result
+
+    @staticmethod
+    def _block_owner(key: str, fallback: Optional[str]) -> Optional[str]:
+        """Resolve the owning component for a flattened config key.
+
+        A single PascalCase top-level segment (``PaymentService.timeout``) is
+        treated as naming its own component so it is not mis-attributed to the
+        file-level owner. Lowercase namespaces (``server.port``, ``spring...")
+        and UPPER_CASE scalar keys fall back to the file owner.
+        """
+        top = key.split(".", 1)[0]
+        if top and top != fallback and re.fullmatch(r"[A-Z][A-Za-z0-9]+", top):
+            return top
+        return fallback
 
     def _flatten(self, rel_path: str, content: str, result: ParseResult) -> dict[str, Any]:
         """Flatten structured config into key-value pairs."""

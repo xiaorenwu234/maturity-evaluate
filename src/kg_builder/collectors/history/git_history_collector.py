@@ -26,7 +26,7 @@ from typing import Optional
 from ...config import BuildSettings
 from ...graph.model import KGEdge, KGNode, Provenance, make_node_id
 from ...graph.ontology import NodeType, RelationType, SourceType
-from ..base import BaseCollector, CollectorResult
+from ..base import BaseCollector, CollectorResult, module_name_of
 from ..code.enrichment.languages import detect_language
 
 _CONFIDENCE = 0.85
@@ -111,11 +111,9 @@ class HistoryCollector(BaseCollector):
         p = Path(rel_path)
         if detect_language(p) is None:     # ignore docs / assets as coupling noise
             return None
-        stem = rel_path.rsplit(".", 1)[0] if "." in p.name else rel_path
-        parts = [seg for seg in stem.replace("\\", "/").split("/") if seg not in {"", "."}]
-        if parts and parts[-1] == "__init__":
-            parts.pop()
-        return ".".join(parts) or None
+        # Same key the code collector stores on Module nodes (dotted Python
+        # module / Java file module), so churn merges onto the existing node.
+        return module_name_of(rel_path) or None
 
     def _ensure(self, result: CollectorResult, index: dict[str, KGNode], module: str, files: list[str]) -> KGNode:
         existing = index.get(module)

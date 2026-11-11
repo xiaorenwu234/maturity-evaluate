@@ -54,6 +54,10 @@ def test_pipeline_build_structural(tmp_path):
     # Core entities from code should be present (no LLM needed for structure).
     assert report.stats["nodes_by_type"].get(NodeType.SERVICE.value, 0) >= 3
     assert report.stats["relations_by_type"].get(RelationType.CALLS.value, 0) >= 1
+    # Container-tree topology: Class nodes + CONTAINS structure + Service->Class overlay.
+    assert report.stats["nodes_by_type"].get(NodeType.CLASS.value, 0) >= 3
+    assert report.stats["relations_by_type"].get(RelationType.CONTAINS.value, 0) >= 1
+    assert report.stats["relations_by_type"].get(RelationType.IMPLEMENTS.value, 0) >= 1
     assert report.enrichment == {"skipped": True}
     # Persisted + reloadable.
     assert out.exists()

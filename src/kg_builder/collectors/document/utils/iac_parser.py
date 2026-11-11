@@ -67,9 +67,9 @@ class IacParser(BaseConfigParser):
         # Extract resource blocks: resource "type" "name" { ... }
         resources = re.findall(r'resource\s+"([^"]+)"\s+"([^"]+)"', content)
         for rtype, rname in resources:
-            node_id = make_node_id("Infrastructure", f"{rtype}/{rname}", namespace)
+            node_id = make_node_id(NodeType.INFRASTRUCTURE.value, f"{rtype}/{rname}", namespace)
             result.nodes.append(KGNode(
-                id=node_id, type="Infrastructure", name=rname,
+                id=node_id, type=NodeType.INFRASTRUCTURE.value, name=rname,
                 canonical_name=f"{rtype}/{rname}", namespace=namespace,
                 attributes={"kind": "terraform_resource", "resource_type": rtype, "source_file": rel_path},
                 provenance=[prov],
@@ -89,9 +89,9 @@ class IacParser(BaseConfigParser):
         # Extract module blocks
         modules = re.findall(r'module\s+"([^"]+)"', content)
         for mname in modules:
-            node_id = make_node_id("Infrastructure", f"tf-module/{mname}", namespace)
+            node_id = make_node_id(NodeType.INFRASTRUCTURE.value, f"tf-module/{mname}", namespace)
             result.nodes.append(KGNode(
-                id=node_id, type="Infrastructure", name=mname,
+                id=node_id, type=NodeType.INFRASTRUCTURE.value, name=mname,
                 canonical_name=f"tf-module/{mname}", namespace=namespace,
                 attributes={"kind": "terraform_module", "source_file": rel_path},
                 provenance=[prov],
@@ -114,9 +114,9 @@ class IacParser(BaseConfigParser):
             for rtype, instances in resources.items():
                 if isinstance(instances, dict):
                     for rname in instances:
-                        node_id = make_node_id("Infrastructure", f"{rtype}/{rname}", namespace)
+                        node_id = make_node_id(NodeType.INFRASTRUCTURE.value, f"{rtype}/{rname}", namespace)
                         result.nodes.append(KGNode(
-                            id=node_id, type="Infrastructure", name=rname,
+                            id=node_id, type=NodeType.INFRASTRUCTURE.value, name=rname,
                             canonical_name=f"{rtype}/{rname}", namespace=namespace,
                             attributes={"kind": "terraform_resource", "resource_type": rtype, "source_file": rel_path},
                             provenance=[prov],
@@ -141,9 +141,9 @@ class IacParser(BaseConfigParser):
                 hosts = play.get("hosts", "")
                 tasks = play.get("tasks", [])
 
-                node_id = make_node_id("Pipeline", f"ansible/{play_name}", namespace)
+                node_id = make_node_id(NodeType.PIPELINE.value, f"ansible/{play_name}", namespace)
                 result.nodes.append(KGNode(
-                    id=node_id, type="Pipeline", name=play_name,
+                    id=node_id, type=NodeType.PIPELINE.value, name=play_name,
                     canonical_name=f"ansible/{play_name}", namespace=namespace,
                     attributes={
                         "kind": "ansible_play", "hosts": str(hosts),

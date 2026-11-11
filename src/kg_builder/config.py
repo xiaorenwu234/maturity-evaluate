@@ -58,6 +58,15 @@ class DocumentSettings(BaseModel):
     extensions: list[str] = Field(
         default_factory=lambda: [".md", ".markdown", ".rst", ".txt", ".yaml", ".yml", ".json", ".toml", ".ini", ".properties"]
     )
+    # Filenames skipped outright: dependency lock files are generated data, not
+    # configuration. Flattening `package-lock.json` alone produced 500 Config
+    # nodes on a real repo -- all of them isolated noise.
+    exclude_files: list[str] = Field(
+        default_factory=lambda: [
+            "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml",
+            "poetry.lock", "Pipfile.lock", "composer.lock", "Cargo.lock", "go.sum",
+        ]
+    )
     max_file_bytes: int = 1_000_000
 
 

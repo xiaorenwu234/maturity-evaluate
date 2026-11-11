@@ -113,9 +113,9 @@ class MonitorParser(BaseConfigParser):
         title = data.get("title", data.get("dashboard", {}).get("title", rel_path))
         panels = data.get("panels", data.get("dashboard", {}).get("panels", []))
 
-        node_id = make_node_id("Dashboard", title, namespace)
+        node_id = make_node_id(NodeType.DASHBOARD.value, title, namespace)
         result.nodes.append(KGNode(
-            id=node_id, type="Dashboard", name=title,
+            id=node_id, type=NodeType.DASHBOARD.value, name=title,
             canonical_name=title, namespace=namespace,
             attributes={
                 "panel_count": len(panels) if isinstance(panels, list) else 0,

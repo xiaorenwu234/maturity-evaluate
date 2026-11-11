@@ -13,7 +13,7 @@ import yaml
 
 from ....graph.model import KGEdge, KGNode, Provenance, make_node_id
 from ....graph.ontology import NodeType, RelationType, SourceType
-from .base import BaseConfigParser, ParseResult
+from .base import BaseConfigParser, ParseResult, owner_service_node
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +78,9 @@ class DockerParser(BaseConfigParser):
                 cmd = line.split(None, 1)[1][:200]
 
         container_name = owner_service or rel_path.replace("/", "_").replace(".", "_")
-        node_id = make_node_id("Container", container_name, namespace)
+        node_id = make_node_id(NodeType.CONTAINER.value, container_name, namespace)
         result.nodes.append(KGNode(
-            id=node_id, type="Container", name=container_name,
+            id=node_id, type=NodeType.CONTAINER.value, name=container_name,
             canonical_name=container_name, namespace=namespace,
             attributes={
                 "base_image": base_image, "ports": ports,
@@ -91,8 +91,9 @@ class DockerParser(BaseConfigParser):
 
         # Link to service
         if owner_service:
-            svc_id = make_node_id(NodeType.SERVICE.value, owner_service, namespace)
-            result.edges.append(KGEdge(svc_id, node_id, RelationType.DEPENDS_ON.value,
+            svc_node = owner_service_node(owner_service, namespace, rel_path, prov)
+            result.nodes.append(svc_node)
+            result.edges.append(KGEdge(svc_node.id, node_id, RelationType.DEPENDS_ON.value,
                                        {"kind": "containerized_as"}, [prov]))
 
         # Base image as external dependency
@@ -132,9 +133,9 @@ class DockerParser(BaseConfigParser):
             env = svc_config.get("environment", {})
             depends = svc_config.get("depends_on", [])
 
-            node_id = make_node_id("Container", svc_name, namespace)
+            node_id = make_node_id(NodeType.CONTAINER.value, svc_name, namespace)
             result.nodes.append(KGNode(
-                id=node_id, type="Container", name=svc_name,
+                id=node_id, type=NodeType.CONTAINER.value, name=svc_name,
                 canonical_name=svc_name, namespace=namespace,
                 attributes={
                     "image": image, "ports": ports,
@@ -147,11 +148,11 @@ class DockerParser(BaseConfigParser):
             # depends_on edges
             if isinstance(depends, list):
                 for dep in depends:
-                    dep_id = make_node_id("Container", dep, namespace)
+                    dep_id = make_node_id(NodeType.CONTAINER.value, dep, namespace)
                     result.edges.append(KGEdge(node_id, dep_id, RelationType.DEPENDS_ON.value,
                                                {"kind": "compose_depends_on"}, [prov]))
             elif isinstance(depends, dict):
                 for dep in depends:
-                    dep_id = make_node_id("Container", dep, namespace)
+                    dep_id = make_node_id(NodeType.CONTAINER.value, dep, namespace)
                     result.edges.append(KGEdge(node_id, dep_id, RelationType.DEPENDS_ON.value,
                                                {"kind": "compose_depends_on"}, [prov]))

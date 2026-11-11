@@ -75,6 +75,31 @@ def treesitter_python_status() -> Tuple[bool, str]:
 
 
 @lru_cache(maxsize=1)
+def treesitter_java_status() -> Tuple[bool, str]:
+    """Check whether tree-sitter + tree-sitter-java can parse Java source.
+
+    Kept out of :func:`check_all` on purpose: the Java channel is optional
+    (``code_analysis.java_enabled``) and callers only probe it when Java files
+    are present, so the Python-only status contract stays stable.
+    """
+    try:
+        import tree_sitter  # noqa: F401
+        import tree_sitter_java  # noqa: F401
+    except ImportError as exc:
+        return False, f"tree-sitter-java missing: {exc} (pip install tree-sitter>=0.21 tree-sitter-java>=0.21)"
+    try:
+        from tree_sitter import Language, Parser
+        lang = Language(tree_sitter_java.language())
+        parser = Parser(lang)
+        tree = parser.parse(b"class X {}\n")
+        if tree.root_node.child_count == 0:
+            return False, "tree-sitter-java grammar loaded but produced empty tree"
+        return True, f"tree-sitter={getattr(tree_sitter, '__version__', '?')} java={getattr(tree_sitter_java, '__version__', '?')}"
+    except Exception as exc:
+        return False, f"tree-sitter-java smoke parse failed: {exc}"
+
+
+@lru_cache(maxsize=1)
 def joern_status() -> Tuple[bool, str]:
     """Check whether the ``joern-cli`` (Joern CPG toolkit) is available."""
     path = shutil.which("joern-cli")

@@ -12,7 +12,7 @@ import yaml
 
 from ....graph.model import KGEdge, KGNode, Provenance, make_node_id
 from ....graph.ontology import NodeType, RelationType, SourceType
-from .base import BaseConfigParser, ParseResult
+from .base import BaseConfigParser, ParseResult, owner_service_node
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,13 @@ _K8S_KINDS = {
     "Secret", "Namespace", "Job", "CronJob", "NetworkPolicy",
     "PersistentVolumeClaim", "ServiceAccount", "Role", "RoleBinding",
     "ClusterRole", "ClusterRoleBinding",
+}
+
+# Kinds that deserve a dedicated ontology node type instead of the generic
+# Infrastructure bucket.
+_INFRA_TYPE_BY_KIND = {
+    "Pod": NodeType.POD,
+    "Namespace": NodeType.NAMESPACE,
 }
 
 
@@ -75,13 +82,18 @@ class K8sParser(BaseConfigParser):
                         "kind": kind, "k8s_namespace": ns,
                         "replicas": spec.get("replicas"),
                         "labels": labels, "source_file": rel_path,
+                        "pod_labels": (
+                            spec.get("template", {}).get("metadata", {}).get("labels", {})
+                            or {}
+                        ),
                     },
                     provenance=[prov],
                 ))
                 # Link to owner service if known
                 if owner_service:
-                    svc_id = make_node_id(NodeType.SERVICE.value, owner_service, namespace)
-                    result.edges.append(KGEdge(svc_id, node_id, RelationType.DEPLOYED_AS.value,
+                    svc_node = owner_service_node(owner_service, namespace, rel_path, prov)
+                    result.nodes.append(svc_node)
+                    result.edges.append(KGEdge(svc_node.id, node_id, RelationType.DEPLOYED_AS.value,
                                                {"source": "doc_k8s_parser"}, [prov]))
 
             elif kind == "Service":
@@ -94,15 +106,16 @@ class K8sParser(BaseConfigParser):
                     attributes={
                         "service_type": svc_spec.get("type"),
                         "ports": ports, "labels": labels, "source_file": rel_path,
+                        "k8s_namespace": ns, "selector": svc_spec.get("selector") or {},
                     },
                     provenance=[prov],
                 ))
 
             elif kind in ("HorizontalPodAutoscaler", "HPA"):
                 spec = doc.get("spec", {}) or {}
-                node_id = make_node_id("AutoScaling", f"{ns}/{name}" if ns else name, namespace)
+                node_id = make_node_id(NodeType.AUTOSCALING.value, f"{ns}/{name}" if ns else name, namespace)
                 result.nodes.append(KGNode(
-                    id=node_id, type="AutoScaling", name=name,
+                    id=node_id, type=NodeType.AUTOSCALING.value, name=name,
                     canonical_name=f"{ns}/{name}" if ns else name, namespace=namespace,
                     attributes={
                         "min_replicas": spec.get("minReplicas"),
@@ -133,11 +146,13 @@ class K8sParser(BaseConfigParser):
                         provenance=[prov],
                     ))
 
-            # Other kinds (Secret, Job, CronJob, etc.) get generic Infrastructure nodes
+            # Remaining kinds get a generic infrastructure node, with Pod and
+            # Namespace registered as their own ontology types.
             else:
-                node_id = make_node_id("Infrastructure", f"k8s-{kind}/{name}", namespace)
+                ntype = _INFRA_TYPE_BY_KIND.get(kind, NodeType.INFRASTRUCTURE)
+                node_id = make_node_id(ntype.value, f"k8s-{kind}/{name}", namespace)
                 result.nodes.append(KGNode(
-                    id=node_id, type="Infrastructure", name=name,
+                    id=node_id, type=ntype.value, name=name,
                     canonical_name=f"k8s-{kind}/{name}", namespace=namespace,
                     attributes={"kind": kind, "k8s_namespace": ns, "labels": labels, "source_file": rel_path},
                     provenance=[prov],

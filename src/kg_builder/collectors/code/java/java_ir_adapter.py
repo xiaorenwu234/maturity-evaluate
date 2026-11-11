@@ -1,14 +1,20 @@
 """Build FileArtifact from Java source + Joern call index.
 
-Uses tree-sitter-java for structural extraction (classes, functions, imports)
-and Joern's CPG for precise call resolution. Mirrors the Python ir_compat.py
-design but adapted for Java syntax.
+Uses tree-sitter-java for structural extraction (classes, methods, imports) and
+Joern's CPG for call resolution. Mirrors the Python ir_compat.py design but
+adapted for Java syntax.
+
+Hard-failure semantics: a missing ``tree-sitter-java`` grammar raises instead of
+returning an empty artifact, and a call Joern cannot resolve stays unresolved
+(no edge) -- there is no name-matching fallback. Both rules match the module's
+"no silent degradation" contract.
 """
 from __future__ import annotations
 
 import re
 from typing import Optional
 
+from ...base import java_module_name
 from ..schema.artifact import (
     ArgHint, CallRef, ClassDef, FileArtifact, FunctionDef, ImportRef, Metrics,
 )
@@ -21,13 +27,22 @@ def _java_module_of(rel_path: str) -> str:
 
     ``src/main/java/com/example/OrderService.java`` -> ``com.example.OrderService``
     """
-    # Strip common Java source roots.
-    p = rel_path.replace("\\", "/")
-    for prefix in ("src/main/java/", "src/test/java/", "src/"):
-        if p.startswith(prefix):
-            p = p[len(prefix):]
-            break
-    return p.replace("/", ".").removesuffix(".java")
+    return java_module_name(rel_path)
+
+
+def _class_qname(module: str, class_name: Optional[str]) -> str:
+    """Qualified name of a class without duplicating the file-derived segment.
+
+    ``module`` already ends with the file name (``com.example.OrderService``),
+    so appending the class name again would produce
+    ``com.example.OrderService.OrderService`` and break matching against Joern's
+    ``com.example.OrderService.createOrder``.
+    """
+    if not class_name:
+        return module
+    if module == class_name or module.endswith("." + class_name):
+        return module
+    return f"{module}.{class_name}"
 
 
 def _compute_java_cc(method_node) -> int:
@@ -99,65 +114,41 @@ def build_java_artifact(
 ) -> FileArtifact:
     """Build a FileArtifact for one Java file using tree-sitter + Joern.
 
-    When Joern CPG is unavailable, falls back to tree-sitter-only extraction
-    with simple heuristic call resolution (method name matching within the
-    same file and across files via the call_index's methods_by_name table).
+    Raises:
+        ImportError: when the tree-sitter-java grammar is unavailable. Collection
+            must abort rather than silently yield an empty artifact.
     """
     art = FileArtifact(path=path, language="java", module=module)
 
     try:
         from tree_sitter import Language, Parser  # type: ignore[import-untyped]
         import tree_sitter_java  # type: ignore[import-untyped]
-        lang = Language(tree_sitter_java.language())
-        parser = Parser(lang)
-        tree = parser.parse(source.encode("utf-8"))
-    except ImportError:
-        return art  # tree-sitter-java not installed; return empty artifact.
+    except ImportError as exc:
+        raise ImportError(
+            "tree-sitter-java is required for Java analysis "
+            "(pip install tree-sitter>=0.21 tree-sitter-java>=0.21)"
+        ) from exc
+
+    lang = Language(tree_sitter_java.language())
+    parser = Parser(lang)
+    tree = parser.parse(source.encode("utf-8"))
 
     lines = source.splitlines()
 
-    # First pass: collect all method definitions in this file for local resolution.
-    local_methods: dict[str, str] = {}  # bare_name -> full_qname
-    _collect_methods(tree.root_node, module, local_methods)
-
     # Walk the CST to extract classes, methods, imports, and calls.
-    _walk_node(tree.root_node, art, module, path, lines, call_index, depth=0, local_methods=local_methods, source=source)
+    _walk_node(tree.root_node, art, module, path, lines, call_index, depth=0, source=source)
 
     return art
 
 
-def _collect_methods(node, module: str, local_methods: dict[str, str]):
-    """Collect all method definitions in the file for local call resolution."""
-    if node.type == "method_declaration":
-        name_node = node.child_by_field_name("name")
-        if name_node:
-            method_name = name_node.text.decode("utf-8")
-            # Find enclosing class.
-            class_name = None
-            parent = node.parent
-            while parent:
-                if parent.type == "class_declaration":
-                    cn = parent.child_by_field_name("name")
-                    class_name = cn.text.decode("utf-8") if cn else None
-                    break
-                parent = parent.parent
-            qname = f"{module}.{class_name}.{method_name}" if class_name else f"{module}.{method_name}"
-            local_methods[method_name] = qname
-
-    for child in node.children:
-        _collect_methods(child, module, local_methods)
-
-
-def _walk_node(node, art, module, path, lines, call_index, depth, local_methods=None, source=None):
+def _walk_node(node, art, module, path, lines, call_index, depth, source=None):
     """Recursively walk tree-sitter-java CST nodes."""
-    if local_methods is None:
-        local_methods = {}
     t = node.type
 
     if t == "class_declaration":
         name_node = node.child_by_field_name("name")
         class_name = name_node.text.decode("utf-8") if name_node else "Unknown"
-        qname = f"{module}.{class_name}"
+        qname = _class_qname(module, class_name)
         line = node.start_point[0] + 1
         end_line = node.end_point[0] + 1
 
@@ -200,7 +191,7 @@ def _walk_node(node, art, module, path, lines, call_index, depth, local_methods=
                 break
             parent = parent.parent
 
-        qname = f"{module}.{class_name}.{method_name}" if class_name else f"{module}.{method_name}"
+        qname = f"{_class_qname(module, class_name)}.{method_name}" if class_name else f"{module}.{method_name}"
 
         # Params.
         params_node = node.child_by_field_name("parameters")
@@ -276,7 +267,7 @@ def _walk_node(node, art, module, path, lines, call_index, depth, local_methods=
                     if pp.type == "class_declaration":
                         cn = pp.child_by_field_name("name")
                         cn_text = cn.text.decode("utf-8") if cn else ""
-                        caller_qname = f"{module}.{cn_text}.{mn_text}"
+                        caller_qname = f"{_class_qname(module, cn_text)}.{mn_text}"
                         break
                     pp = pp.parent
                 if not caller_qname:
@@ -284,15 +275,9 @@ def _walk_node(node, art, module, path, lines, call_index, depth, local_methods=
                 break
             parent = parent.parent
 
-        # Try Joern resolution first, then fall back to local method matching.
+        # Joern is the only call resolver: an unresolved site stays unresolved
+        # (no edge) instead of falling back to bare method-name matching.
         resolved = resolve_java_call(call_index, path, line, callee_text)
-        if not resolved and callee_text in local_methods:
-            # Local heuristic: match by bare method name within this file.
-            from .cpg_parser import ResolvedJavaCall
-            resolved = ResolvedJavaCall(
-                callee_qname=local_methods[callee_text],
-                caller_qname=caller_qname,
-            )
         call_ref = CallRef(
             caller_qname=caller_qname, callee_name=full_callee,
             file=path, line=line, args=[],
@@ -304,4 +289,4 @@ def _walk_node(node, art, module, path, lines, call_index, depth, local_methods=
 
     # Recurse into children.
     for child in node.children:
-        _walk_node(child, art, module, path, lines, call_index, depth + 1, local_methods, source)
+        _walk_node(child, art, module, path, lines, call_index, depth + 1, source)

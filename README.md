@@ -43,9 +43,9 @@
 
 ### 本体（Ontology）
 
-| 节点 NodeType | Service / Module / API / Function / Config / Database / Deployment / Metric / Document / ExternalDependency |
+| 节点 NodeType | Service / Module / API / Function / Config / Database / Deployment / Metric / Document / ExternalDependency / Namespace / Pod / Infrastructure / AutoScaling / Container / Pipeline / Dashboard |
 |---|---|
-| **关系 RelationType** | `CALLS` `DEPENDS_ON` `DEPLOYED_AS` `CONFIGURED_BY` `READS` `WRITES` `EXPOSES` `OBSERVED_BY` |
+| **关系 RelationType** | `CALLS` `DEPENDS_ON` `DEPLOYED_AS` `CONFIGURED_BY` `READS` `WRITES` `EXPOSES` `OBSERVED_BY` `INHERITS` `TEMPORALLY_COUPLED` `CLONE_OF` `IMPLEMENTS` `MENTIONS` `SCALES` |
 | **来源 SourceType** | `source_code` `document` `deployment` `runtime` `llm` `manual` |
 
 ---
